@@ -664,6 +664,7 @@ LogicalResult TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp)
 {
     // --- ConversionTarget: dynamic legality checks ---
     mlir::ConversionTarget target(getContext());
+    target.addLegalDialect<mlir::tensor::TensorDialect>();
 
     // Dialect-level dynamic legality: ops are legal if none of their operands/results use TensorDescType.
     target.addDynamicallyLegalDialect<mlir::arith::ArithDialect, mlir::scf::SCFDialect, triton::TritonDialect>(
@@ -677,12 +678,13 @@ LogicalResult TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp)
                !DescriptorConverter::hasATensorDescriptorType(funcOp.getFunctionType().getResults());
     });
     target.addLegalOp<triton::MakeTensorDescOp>();
-    target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp>();
+    target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp, triton::DescriptorScatterOp>();
 
     // --- Patterns ---
     mlir::RewritePatternSet patterns(&getContext());
     patterns.add<DescriptorConverter::DescriptorLoadConverter>(patterns.getContext());
     patterns.add<DescriptorConverter::DescriptorStoreConverter>(patterns.getContext());
+    patterns.add<DescriptorConverter::DescriptorScatterConverter>(patterns.getContext());
 
     mlir::ConversionConfig config;
     config.buildMaterializations = true;
