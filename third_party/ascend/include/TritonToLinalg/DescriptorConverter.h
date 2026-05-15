@@ -70,6 +70,16 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+class DescriptorScatterConverter
+    : public OpConversionPattern<triton::DescriptorScatterOp> {
+public:
+  using OpConversionPattern<triton::DescriptorScatterOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::DescriptorScatterOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 } // end of namespace DescriptorConverter
 
 #endif // TRITON_ADAPTER_DESCRIPTORCONVERTER_H

@@ -223,3 +223,45 @@ def test_tensor_descriptor_padding(dtype, padding):
         expected[IM:OM, :] = float('nan')
 
     torch.testing.assert_close(expected, out_device_tma, equal_nan=True)
+
+
+@pytest.mark.parametrize("X, Y", [(128, 128), (64, 256)])
+@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32), (64, 128), (16, 128), (512, 16)])
+@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32'])
+@pytest.mark.parametrize("y", [0, 32, 48])
+def test_tensor_descriptor_scatter(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
+
+    def torch_scatter_rows(input, idx, y, block_y, X, Y):
+        out = torch.zeros((X, Y), dtype=input.dtype, device=input.device)
+        for i, j in enumerate(idx):
+            out[j][y:y + block_y] = input[i]
+        return out
+
+    @triton.jit
+    def tensor_descriptor_scatter_rows_kernel(out_ptr, in_ptr, idx_ptr, y, X: tl.constexpr, Y: tl.constexpr,
+                                              BLOCK_X: tl.constexpr, BLOCK_Y: tl.constexpr):
+        idx = tl.load(idx_ptr + tl.arange(0, BLOCK_X))
+        data = tl.load(in_ptr + tl.arange(0, BLOCK_X)[:, None] * BLOCK_Y + tl.arange(0, BLOCK_Y)[None, :])
+        desc = tl.make_tensor_descriptor(out_ptr, [X, Y], [Y, 1], [1, BLOCK_Y])
+        desc.scatter(data, idx, y)
+
+    device = 'npu'
+    if BLOCK_X > X or y + BLOCK_Y > Y:
+        pytest.skip()
+
+    torch.manual_seed(42)
+    torch_dtype = getattr(torch, dtype)
+    input_tensor = torch.arange(BLOCK_X * BLOCK_Y, dtype=torch_dtype, device=device).reshape(BLOCK_X, BLOCK_Y)
+    output = torch.zeros((X, Y), dtype=torch_dtype, device=device)
+
+    idx = torch.randperm(BLOCK_X, dtype=torch.int32, device=device)
+
+    def alloc_fn(size: int, align: int, stream):
+        return torch.empty(size, dtype=torch.int8, device=device)
+
+    triton.set_allocator(alloc_fn)
+
+    tensor_descriptor_scatter_rows_kernel[(1, )](output, input_tensor, idx, y, X, Y, BLOCK_X, BLOCK_Y)
+
+    ref = torch_scatter_rows(input_tensor, idx, y, BLOCK_Y, X, Y)
+    torch.testing.assert_close(ref, output, atol=0, rtol=0)

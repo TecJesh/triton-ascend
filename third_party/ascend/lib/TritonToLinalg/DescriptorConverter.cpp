@@ -197,4 +197,68 @@ LogicalResult DescriptorStoreConverter::matchAndRewrite(
   return success();
 }
 
+LogicalResult DescriptorScatterConverter::matchAndRewrite(
+    triton::DescriptorScatterOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto descTy = op.getDesc().getType();
+  auto srcType = cast<RankedTensorType>(op.getSrc().getType());
+  const auto rowBlockShape = descTy.getSignlessBlockType().getShape();
+
+  auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
+  SmallVector<int32_t> tensorShapeValues;
+  tensorShapeValues.reserve(rowBlockShape.size());
+  for (auto dim : rowBlockShape) {
+    tensorShapeValues.push_back(static_cast<int32_t>(dim));
+  }
+
+  auto zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  auto oneIndex = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  Value rowUpperBound;
+  if (srcType.isDynamicDim(0)) {
+    rowUpperBound = rewriter.create<tensor::DimOp>(loc, adaptor.getSrc(), 0);
+  } else {
+    rowUpperBound =
+        rewriter.create<arith::ConstantIndexOp>(loc, srcType.getShape()[0]);
+  }
+  auto rowBoundaryCheck = getFullBoundaryCheckAttr(rewriter, rowBlockShape);
+  auto cacheModifier = triton::CacheModifierAttr::get(
+      rewriter.getContext(), triton::CacheModifier::NONE);
+  auto evictionPolicy = triton::EvictionPolicyAttr::get(
+      rewriter.getContext(), triton::EvictionPolicy::NORMAL);
+
+  auto loop = rewriter.create<scf::ForOp>(
+      loc, zeroIndex, rowUpperBound, oneIndex, ValueRange{},
+      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value rowIv,
+          ValueRange) {
+        Value xOffset = nestedBuilder.create<tensor::ExtractOp>(
+            nestedLoc, adaptor.getXOffsets(), ValueRange{rowIv});
+        Value tensorPtr = nestedBuilder.create<triton::MakeTensorPtrOp>(
+            nestedLoc, desc.base, desc.shape, desc.strides,
+            ValueRange{xOffset, adaptor.getYOffset()}, tensorShapeValues,
+            computeOrder(rowBlockShape));
+        SmallVector<OpFoldResult> extractOffsets{rowIv,
+                                                 nestedBuilder.getIndexAttr(0)};
+        SmallVector<OpFoldResult> extractSizes{
+            nestedBuilder.getIndexAttr(rowBlockShape[0]),
+            nestedBuilder.getIndexAttr(rowBlockShape[1])};
+        SmallVector<OpFoldResult> extractStrides{nestedBuilder.getIndexAttr(1),
+                                                 nestedBuilder.getIndexAttr(1)};
+        auto rowValue = nestedBuilder.create<tensor::ExtractSliceOp>(
+            nestedLoc, adaptor.getSrc(), extractOffsets, extractSizes,
+            extractStrides);
+        auto rowStore = nestedBuilder.create<triton::StoreOp>(
+            nestedLoc, tensorPtr, rowValue.getResult(), Value(),
+            rowBoundaryCheck, cacheModifier, evictionPolicy);
+        rowStore->setAttr(ConverterUtils::discreteAttrName,
+                          nestedBuilder.getUnitAttr());
+        nestedBuilder.create<scf::YieldOp>(nestedLoc);
+      });
+  loop->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
+  loop->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
+
+  rewriter.eraseOp(op);
+  return success();
+}
+
 } // namespace DescriptorConverter
