@@ -30,10 +30,15 @@ Author: Triton-Ascend Contributors
 
 import warnings
 import contextlib
+import inspect
 import numpy as np
 import triton.language as tl
+from triton.language.extra.cann.semantic import AscendTritonSemantic
 from .interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype
 from .._C.libtriton import interpreter as _interpreter
+from .._C.libtriton import ir as _ir
+from dataclasses import dataclass
+from typing import Tuple
 
 
 class AscendReduceOps(ReduceOps):
@@ -733,3 +738,185 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             UserWarning,
             stacklevel=2 
         )
+
+def _convert_float(input, input_dtype, output_dtype, rounding_mode):
+    input_uint_dtype = getattr(np, f"uint{input_dtype.primitive_bitwidth}")
+    output_unint_dtype = getattr(np, f"uint{output_dtype.primitive_bitwidth}")
+    input_bin = np.frombuffer(input.tobytes(), dtype=input_uint_dtype)
+    sign = (input_bin >> (input_dtype.primitive_bitwidth - 1)) & 0x01
+    input_exponent_width = input_dtype.primitive_bitwidth - input_dtype.fp_mantissa_width - 1
+    output_exponent_width = output_dtype.primitive_bitwidth - output_dtype.fp_mantissa_width - 1
+    significand = input_bin & ((1 << input_dtype.fp_mantissa_width) - 1)
+    bias_input = input_dtype.exponent_bias
+    bias_output = output_dtype.exponent_bias
+    exponent = ((input_bin >> input_dtype.fp_mantissa_width) & ((1 << input_exponent_width) - 1)).astype(np.int32)
+    # mark NAN value
+    input_nan_index = (exponent == (1 << input_exponent_width) - 1) & (significand != 0)
+    subnormal_index = exponent == 0
+    if np.any(subnormal_index):
+        # Credit to Phil: phil@openai.com
+        # subnormal repr: ((-1.0)**sign) * (2.0**(1 - exp_bias)) * (2^(m0) + 2^(m1) + ... + 2^(mn))
+        # where m0, m1, ..., mn are the 1-bit of the mantissa
+        # convert it to normal repr: ((-1.0)**sign) * (2.0**(1 + m0 - exp_bias)) * (1 + 2^(m1 - m0) + ... + 2^(mn - m0))
+        bit_pos = np.zeros_like(input_bin, dtype=np.int32)
+        # Find the most significant bit of the mantissa in the significand
+        for i in range(input_dtype.fp_mantissa_width):
+            bit_index = ((significand >> i) & 0x01)
+            # pos should be >= 1
+            bit_pos[bit_index == 1] = input_dtype.fp_mantissa_width - i
+        zero_significand_index = significand == 0
+        exponent[subnormal_index] = 1 - bit_pos[subnormal_index]
+        # 0 significand and subnormal should be treated as 0
+        exponent[zero_significand_index & subnormal_index] = bias_input - bias_output
+        significand[subnormal_index] = (significand[subnormal_index] << bit_pos[subnormal_index]) & (
+            (1 << input_dtype.fp_mantissa_width) - 1)
+    # Prevent overflow and underflow
+    exponent_unclamped = exponent - bias_input + bias_output
+    output_max_exponent = (1 << output_exponent_width) - 1
+    exponent_output = np.maximum(0, np.minimum(exponent_unclamped, output_max_exponent))
+    exponent_output = exponent_output.astype(output_unint_dtype)
+    # mark overflow index 
+    overflow_index = exponent_unclamped > output_max_exponent - 1
+    
+    sign_output = sign.astype(output_unint_dtype)
+    if input_dtype.primitive_bitwidth > output_dtype.primitive_bitwidth:  # Downcast
+        significand_output = (significand >> (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width)) & (
+            (1 << output_dtype.fp_mantissa_width) - 1)
+        if rounding_mode == _ir.ROUNDING_MODE.RTNE:  # Round to nearst even
+            # find the cut-off bit
+            cut_off = significand & (1 << (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width - 1))
+            significand_output = significand_output + (cut_off > 0)
+        significand_output = significand_output.astype(output_unint_dtype)
+    else:  # Upcast
+        significand_output = (significand.astype(output_unint_dtype) <<
+                              (output_dtype.fp_mantissa_width - input_dtype.fp_mantissa_width)) & (
+                                  (1 << output_dtype.fp_mantissa_width) - 1)
+    subnormal_index = exponent_output == 0
+    if np.any(subnormal_index):  # underflow
+        # normal repr: ((-1.0)**sign) * (2.0**(exp - exp_bias_input)) * (1 + 2^(m0) + 2^(m1) + ... + 2^(mn))
+        # where m0, m1, ..., mn are the 1-bit of the mantissa
+        # shift = (1 - exp_bias_output) - (exp - exp_bias_input)
+        # convert it to subnormal repr: ((-1.0)**sign) * (2.0**(1 - exp_bias_output)) * (2^(-shift) + 2^(m0 - shift) + 2^(m1 - shift) + ... + 2^(mn - shift))
+        exponent = ((input_bin >> input_dtype.fp_mantissa_width) & ((1 << input_exponent_width) - 1)).astype(np.int32)
+        non_zero_exponent_index = exponent != 0
+        # If the original exponent is not zero, we still need to shift the significand and consider the 1.0 part in mantissa
+        subnormal_index = subnormal_index & non_zero_exponent_index
+        shift = np.zeros_like(input_bin, dtype=np.int32)
+        shift[subnormal_index] = (1 - bias_output) - (exponent[subnormal_index] - bias_input)
+        significand_output[subnormal_index] = (significand_output[subnormal_index] >> shift[subnormal_index]) | (
+            1 << (output_dtype.fp_mantissa_width - shift[subnormal_index]))
+    # covert overflow value to inf
+    significand_output[overflow_index & ~input_nan_index] = 0 
+    output = (sign_output << (output_dtype.primitive_bitwidth - 1)) | (
+        exponent_output << output_dtype.fp_mantissa_width) | significand_output
+    return output.reshape(input.shape)
+
+@dataclass(frozen=True)
+class InterpreterOptions:
+    extern_libs: dict = None
+    debug: bool = False
+    sanitize_overflow: bool = True
+    arch: str = None
+    supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e5b16", "fp8e4nv", "fp8e4b8", "fp8e4b15")
+    deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
+    default_dot_input_precision: str = "tf32"
+    allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee", "hf32")
+    max_num_imprecise_acc_default: int = 0
+    backend_name: str = "interpreter"
+
+_has_ascend_support = False
+_AscendInterpreterBuilder = None
+
+def _try_import_ascend():
+    global _has_ascend_support, _AscendInterpreterBuilder
+    try:
+        # from . import ascend_interpreter
+        _AscendInterpreterBuilder = AscendInterpreterBuilder#ascend_interpreter.AscendInterpreterBuilder
+        _has_ascend_support = True
+    except ImportError as e:
+        _has_ascend_support = False
+        _AscendInterpreterBuilder = None
+    except Exception as e:
+        # Catch other exceptions (like circular import) and log them
+        _has_ascend_support = False
+        _AscendInterpreterBuilder = None
+
+
+def patch_ascend_interpreter():
+    from triton.runtime import interpreter as base_interpreter
+
+    if getattr(base_interpreter, "_ascend_patch_applied", False):
+        return
+
+    # Use AscendInterpreterBuilder if available, otherwise fall back to base InterpreterBuilder
+    _try_import_ascend()
+    if _has_ascend_support and _AscendInterpreterBuilder is not None:
+        interpreter_builder = AscendInterpreterBuilder()
+    else:
+        interpreter_builder = InterpreterBuilder()
+    builder = interpreter_builder
+    base_interpreter.TritonSemantic = AscendTritonSemantic
+    base_interpreter.interpreter_builder = builder
+    base_interpreter.interpreter_semantic = AscendTritonSemantic(builder)
+    base_interpreter._convert_float = _convert_float
+
+    # These keywords are not supported by the interpreter
+    RESERVED_KWS = ["num_warps", "num_stages", "num_ctas", "enable_fp_fusion", "grid", "maxnreg"]
+
+    # Allow Ascend interpreter to extend reserved keywords
+    if hasattr(interpreter_builder, 'get_additional_reserved_keywords'):
+        RESERVED_KWS.extend(interpreter_builder.get_additional_reserved_keywords())
+
+    original_patch_lang = base_interpreter._patch_lang
+
+    def _ascend_patch_lang(fn):
+        original_patch_lang(fn)
+        # Patch Ascend extensions if using AscendInterpreterBuilder
+        if hasattr(interpreter_builder, 'patch_extensions'):
+            interpreter_builder.patch_extensions(fn)
+
+    def _ascend_grid_executor_call(self, *args_dev, **kwargs):
+        
+        if kwargs.pop("warmup", False):
+            return
+        # Removes not used reserved keywords from kwargs
+        # Triton doesn't support keyword-only, variable positional or variable keyword arguments
+        # It's safe to inspect only positional or keyword arguments (i.e., argspec.args)
+        argspec = inspect.getfullargspec(self.fn)
+        kwargs = {k: v for k, v in kwargs.items() if k in argspec.args}
+        # copy arguments to the host
+        args_hst, kwargs_hst = self._init_args_hst(args_dev, kwargs)
+        # remaps core language functions to interpreted ones
+        base_interpreter._patch_lang(self.fn)
+        # we need to copy arguments to the host for the interpreter
+        # implicitly convert tensor arguments to their base pointers
+        args = inspect.getcallargs(self.fn, *args_hst, **kwargs_hst)
+        args = {name: arg if name in self.constexprs else base_interpreter._implicit_cvt(arg) for name, arg in args.items()}
+        # iterate through grid
+        grid = self.grid(args) if callable(self.grid) else self.grid
+        assert len(grid) <= 3, "grid must have at most 3 dimensions"
+        grid = grid + (1, ) * (3 - len(grid))
+        interpreter_builder.set_grid_dim(*grid)
+        try:
+            # Execute kernels - sub_vec_id simulation handled by AscendInterpreterBuilder
+            if hasattr(interpreter_builder, 'execute_with_sub_vec_simulation'):
+                # Ascend builder with sub-vector simulation
+                interpreter_builder.execute_with_sub_vec_simulation(self.fn, args, grid)
+            else:
+                # Standard execution for base interpreter
+                for x in range(grid[0]):
+                    for y in range(grid[1]):
+                        for z in range(grid[2]):
+                            interpreter_builder.set_grid_idx(x, y, z)
+                            self.fn(**args)
+        except Exception as e:
+            if base_interpreter.triton.knobs.compilation.front_end_debugging:
+                raise
+            raise base_interpreter.InterpreterError(repr(e)) from e
+        # copy arguments back to propagate side-effects
+        self._restore_args_dev(args_dev, args_hst, kwargs, kwargs_hst)
+
+    base_interpreter._patch_lang = _ascend_patch_lang
+    base_interpreter.InterpreterOptions = InterpreterOptions
+    base_interpreter.GridExecutor.__call__ = _ascend_grid_executor_call
+    base_interpreter._ascend_patch_applied = True

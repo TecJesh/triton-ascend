@@ -31,6 +31,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import itertools
 from typing import Dict, List
+from triton import knobs
+from triton.errors import OutOfResources
 
 from torch import Tensor
 
@@ -167,6 +169,48 @@ class AutoTilingTuner(Autotuner):
                 f"{len(simd_configs)} SIMD configs (toggle multibuffer={opposite_default_multibuffer})"
             )
         return simd_configs
+    
+    def _bench(self, *args, config, **meta):
+        from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+
+        verbose = knobs.autotuning.print
+        if verbose:
+            print(f"Autotuning kernel {self.base_fn.__name__} with config {config}")
+
+        # check for conflicts, i.e. meta-parameters both provided
+        # as kwargs and by the autotuner
+        conflicts = meta.keys() & config.kwargs.keys()
+        if conflicts:
+            raise ValueError(f"Conflicting meta-parameters: {', '.join(conflicts)}."
+                             " Make sure that you don't re-define auto-tuned symbols.")
+        # augment meta-parameters with tunable ones
+        current = dict(meta, **config.all_kwargs())
+        full_nargs = {**self.nargs, **current}
+
+        def kernel_call():
+            if config.pre_hook:
+                config.pre_hook(full_nargs)
+            self.pre_hook(full_nargs)
+            try:
+                self.fn.run(
+                    *args,
+                    **current,
+                )
+            except Exception as e:
+                try:
+                    self.post_hook(full_nargs, exception=e)
+                finally:
+                    # Throw exception raised by `self.fn.run`
+                    raise
+
+            self.post_hook(full_nargs, exception=None)
+
+        try:
+            return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+        except (OutOfResources, CompileTimeAssertionFailure, MLIRCompilationError) as e:
+            if verbose:
+                print(f"Autotuning failed with {e}")
+            return [float("inf"), float("inf"), float("inf")]
 
     def _init_axis_params(self, key, split_params, tiling_params, low_dim_axes, reduction_axes):
         if isinstance(key, list):

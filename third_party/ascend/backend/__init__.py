@@ -22,13 +22,20 @@ import logging
 from triton._C.libtriton.ascend import ir as ascend_ir
 
 from .testing import do_bench_npu
+from .compiler_patch import patch_compiler_runtime
+from .codegen_patch import patch_ast_to_ttir
 
 
 def _apply_ascend_patch():
-    from triton.compiler.code_generator import CodeGenerator
+    from triton.compiler import compiler as triton_compiler
+    from triton.compiler import code_generator
+    from triton.compiler.ascend_code_generator import AscendCodeGenerator
 
-    if not getattr(CodeGenerator, "_ascend_patch_applied", False):
-        _original_cg_init = CodeGenerator.__init__
+    patch_compiler_runtime(triton_compiler)
+    patch_ast_to_ttir(code_generator)
+
+    if not getattr(AscendCodeGenerator, "_ascend_patch_applied", False):
+        _original_cg_init = AscendCodeGenerator.__init__
 
         def _patched_cg_init(self, *args, **kwargs):
             """
@@ -47,8 +54,8 @@ def _apply_ascend_patch():
                 except Exception as e:
                     logging.warning(f"[Ascend Patch] Failed to set hacc.target: {e}")
 
-        CodeGenerator.__init__ = _patched_cg_init
-        CodeGenerator._ascend_patch_applied = True
+        AscendCodeGenerator.__init__ = _patched_cg_init
+        AscendCodeGenerator._ascend_patch_applied = True
 
 
 __all__ = ["do_bench_npu"]

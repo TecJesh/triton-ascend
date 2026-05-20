@@ -1,23 +1,20 @@
 from __future__ import annotations
 import hashlib
 import json
-from .._C.libtriton import get_cache_invalidating_env_vars, ir, buffer_ir
-from .._C.libtriton.ascend import ir as ascend_ir
+from .._C.libtriton import get_cache_invalidating_env_vars, ir
 from ..backends import backends
 from ..backends.compiler import Language
 from ..backends.compiler import BaseBackend, GPUTarget
 from .. import __version__, knobs
 from ..runtime.autotuner import OutOfResources
-from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key, triton_key
+from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key
 from ..runtime.driver import driver
 from ..tools.disasm import get_sass
-from .errors import MLIRCompilationError
 from pathlib import Path
 import re
 import functools
 import os
 import time
-import copy
 
 # - ^\s*tt\.func\s+ : match the start of the string, any leading whitespace, the keyword func,
 #    and any following whitespace
@@ -294,8 +291,6 @@ def compile(src, target=None, options=None, _env_vars=None):
     if not isinstance(src, IRSource):
         context = ir.context()
         ir.load_dialects(context)
-        buffer_ir.load_dialects(context)
-        ascend_ir.load_dialects(context)
         backend.load_dialects(context)
 
     codegen_fns = backend.get_codegen_implementation(options)
@@ -321,29 +316,7 @@ def compile(src, target=None, options=None, _env_vars=None):
     if compilation_listener:
         timer.finished_ir_initialization()
     for ext, compile_ir in list(stages.items())[first_stage:]:
-        try:
-            next_module = compile_ir(module, metadata)
-        except Exception as e:
-            if (ext == "ttadapter"):
-                stage_name = "ConvertTritonIRToLinalgIR"
-            elif (ext == "npubin"):
-                stage_name = "ConvertLinalgIRToBinary"
-            elif (ext == "bcmlir"):
-                stage_name = "BytecodeToLinalgIRByBishengirOpt"
-            elif (ext == "mlirbc"):
-                stage_name = "LinalgIRToBytecodeByTritonMLIROpt"
-            else:
-                stage_name = "MLIRCompile"
-            if hasattr(e, 'stderr') and e.stderr:
-                error_detail = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else e.stderr
-            else:
-                error_detail = str(e)
-            from ..runtime.cache import FileCacheManager
-            if isinstance(fn_cache_manager, FileCacheManager):
-                error_detail += f"\n\n[INFO]: The compiled kernel cache is in {fn_cache_manager.cache_dir}\n\n"
-            else:
-                error_detail += f"\n\n[INFO]: The compiled kernel cache is {file_name}.{ext}\n\n"
-            raise MLIRCompilationError(stage_name, error_detail) from e
+        next_module = compile_ir(module, metadata)
         ir_filename = f"{file_name}.{ext}"
         if fn_override_manager is None:
             # Users can override kernels at scale by setting `ir_override` in autotune config
@@ -431,7 +404,7 @@ class AsmDict(dict):
 
 
 def _raise_error(err, *args, **kwargs):
-    raise copy.deepcopy(err)
+    raise err
 
 
 class CompiledKernel:
@@ -454,9 +427,8 @@ class CompiledKernel:
         # stores the text of each level of IR that was generated during compilation
         asm_files = [Path(p) for c, p in metadata_group.items() if not c.endswith(".json")]
         binary_ext = backend.binary_ext
-        binary_extensions = getattr(backend, 'binary_extensions', {binary_ext})
         self.asm = AsmDict({
-            file.suffix[1:]: file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
+            file.suffix[1:]: file.read_bytes() if file.suffix[1:] == binary_ext else file.read_text()
             for file in asm_files
         })
         self.metadata_group = metadata_group
@@ -473,13 +445,7 @@ class CompiledKernel:
             return
 
         def raise_(err):
-            # clone the exception object so that the one saved in the closure
-            # of the partial function below doesn't get assigned a stack trace
-            # after the subsequent raise. otherwise, the CompiledKernel instance
-            # saved in the (global) kernel cache will keep references to all the
-            # locals in the traceback via the exception instance in the closure.
-            cloned_err = copy.deepcopy(err)
-            self._run = functools.partial(_raise_error, cloned_err)
+            self._run = functools.partial(_raise_error, err)
             raise err
 
         device = driver.active.get_current_device()
@@ -498,7 +464,7 @@ class CompiledKernel:
             knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
         # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
         self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
-            self.metadata.kernel_name, self.kernel, self.metadata.shared, device, self.metadata.mix_mode)
+            self.name, self.kernel, self.metadata.shared, device)
         warp_size = driver.active.get_current_target().warp_size
         if self.metadata.num_warps * warp_size > self.n_max_threads:
             raise_(OutOfResources(self.metadata.num_warps * warp_size, self.n_max_threads, "threads"))
