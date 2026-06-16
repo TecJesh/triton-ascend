@@ -75,7 +75,9 @@ A: There is an integrated performance analysis tool (profiler). For details, see
 
 **Q: How to resolve "UB Overflow" errors during compilation?**
 
-A: UB Overflow is a common issue in Triton-Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md).
+A: UB Overflow is a common issue in Triton-Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md) to troubleshoot the issue. If you're unsure how to reduce tiling to lower UB usage, you can use Autotune to automatically select the optimal configuration. For details, see [Triton-Ascend Autotune Guide](./autotune_guide.md).
+
+When migrating operators from 950 to A2/A3, UB size differences may cause UB Overflow. If manual troubleshooting doesn't resolve the issue, Autotune can also be used to automatically select the optimal configuration.
 
 ## 8. Triton Usage Constraints
 
