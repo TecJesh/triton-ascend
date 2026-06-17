@@ -1140,7 +1140,7 @@ class tensor(base_value):
     def expand_dims(self, axis) -> tensor:
         ...
 
-    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None) -> tensor:
+    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False) -> tensor:
         ...
 
     def store(self, value, mask=None, boundary_check=(), cache_modifier="", eviction_policy="") -> tensor:
@@ -1954,8 +1954,7 @@ def expand_dims(input, axis, _semantic=None):
 
 @_tensor_member_fn
 @builtin
-def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
-         overflow_mode: Optional[str] = None, _semantic=None):
+def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, _semantic=None):
     """
     Casts a tensor to the given :code:`dtype`.
 
