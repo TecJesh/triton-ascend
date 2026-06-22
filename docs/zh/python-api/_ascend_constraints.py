@@ -29,7 +29,7 @@ CONSTRAINTS = {
     },
     "triton.extension.buffer.language.fixpipe": {
         "constraints": [
-            "DataType: Operates on L0C to UB data movement (Ascend A5/Ascend hardware specific).",
+            "DataType: Operates on L0C to UB data movement (Ascend 950/Ascend hardware specific).",
             "Source must be the result of a dot (matrix multiply) operation.",
             "Destination must be a buffer with UB memory scope.",
         ],
@@ -59,9 +59,11 @@ CONSTRAINTS = {
     },
     "triton.language.abs": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.abs",
+        "example":
+        "triton.language.abs",
     },
     "triton.language.add": {
         "constraints": [
@@ -214,21 +216,22 @@ CONSTRAINTS = {
     },
     "triton.language.cdiv": {
         "constraints": [
-            "DataType: Ascend does not support bool, uint16, uint32, uint64, uint8 (hardware limitation).",
-            "输入范围：0~16777216",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/bool, \
+                Ascend 950 does not support bool.",
+            "Input Range: 0~16777216",
         ],
         "example":
         "triton.language.cdiv",
     },
     "triton.language.ceil": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.ceil",
     },
     "triton.language.clamp": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.clamp",
     },
@@ -249,7 +252,7 @@ CONSTRAINTS = {
     },
     "triton.language.cos": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.cos",
     },
@@ -293,6 +296,10 @@ CONSTRAINTS = {
         "example":
         "triton.language.div",
     },
+    "triton.language.div_rn": {
+        "constraints": [],
+        "example": "triton.language.div_rn",
+    },
     "triton.language.dot_scaled": {
         "constraints": [
             "DataType: Ascend does not support fp4, fp8 (hardware limitation).",
@@ -306,24 +313,25 @@ CONSTRAINTS = {
     },
     "triton.language.equal": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64.",
         ],
     },
     "triton.language.erf": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.erf",
     },
     "triton.language.exp": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.exp",
     },
     "triton.language.exp2": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.exp2",
     },
@@ -333,6 +341,12 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.expand_dims",
+    },
+    "triton.language.fdiv": {
+        "constraints": [
+            "DataType: Ascend A2/A3/950 does not support fp64.",
+        ],
+        "example": "triton.language.fdiv",
     },
     "triton.language.extra.ascend.libdevice.index_select_simd": {
         "constraints": [
@@ -453,9 +467,15 @@ CONSTRAINTS = {
     },
     "triton.language.floor": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.floor",
+    },
+    "triton.language.fma": {
+        "constraints": [
+            "DataType: Ascend A2/A3/950 does not support fp64.",
+        ],
+        "example": "triton.language.fma",
     },
     "triton.language.floordiv": {
         "constraints": [
@@ -484,6 +504,12 @@ CONSTRAINTS = {
     "triton.language.greater_than": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64 (hardware limitation).",
+        ],
+    },
+    "triton.language.greater_equal": {
+        "constraints": [
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64.",
         ],
     },
     "triton.language.histogram": {
@@ -517,12 +543,14 @@ CONSTRAINTS = {
     },
     "triton.language.less_equal": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64.",
         ],
     },
     "triton.language.less_than": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64.",
         ],
     },
     "triton.language.load": {
@@ -551,13 +579,13 @@ CONSTRAINTS = {
     },
     "triton.language.log": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.log",
     },
     "triton.language.log2": {
         "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example": "triton.language.log2",
     },
@@ -863,14 +891,10 @@ CONSTRAINTS = {
         ],
     },
     "triton.language.tensor.logical_and": {
-        "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
-        ],
+        "constraints": [],
     },
     "triton.language.tensor.logical_or": {
-        "constraints": [
-            "DataType: Ascend does not support fp64 (hardware limitation).",
-        ],
+        "constraints": [],
     },
     "triton.language.trans": {
         "constraints": [
