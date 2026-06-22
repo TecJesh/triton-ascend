@@ -149,6 +149,34 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
+// Canonicalize triton::LoadOp that has a mask but no 'other' value by
+// supplying a zero-filled 'other'.
+struct MaskedLoadOtherCanonicalizer : OpRewritePattern<triton::LoadOp> {
+  using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::LoadOp op,
+                                PatternRewriter &rewriter) const final {
+    auto mask = op.getMask();
+    auto other = op.getOther();
+    if (!mask || other)
+      return failure();
+
+    auto loc = op.getLoc();
+    auto ptr = op.getPtr();
+
+    FailureOr<Value> zeroConst = specializeTypelessValueToConstant(
+        TypelessValue::Zero, ptr.getType(), loc, rewriter);
+    if (failed(zeroConst))
+      return failure();
+
+    auto newLoadOp = rewriter.create<triton::LoadOp>(
+        loc, ptr, mask, *zeroConst, op.getCache(), op.getEvict(),
+        op.getIsVolatile());
+    rewriter.replaceOp(op, newLoadOp.getResult());
+    return success();
+  }
+};
+
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
@@ -357,8 +385,9 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   auto moduleOp = getOperation();
 
   RewritePatternSet patterns(&getContext());
-  patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,
-               DiscreteMaskAtomicConversion>(patterns.getContext());
+  patterns.add<MaskedLoadOtherCanonicalizer, DiscreteMaskLoadConversion,
+               DiscreteMaskStoreConversion, DiscreteMaskAtomicConversion>(
+      patterns.getContext());
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply discrete mask access patterns");
     signalPassFailure();
