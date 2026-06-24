@@ -25,6 +25,11 @@ on:
         description: 'Specific upstream triton commit SHA (leave empty for latest)'
         required: false
         default: ''
+      enable_codegraph:
+        description: 'Enable Codegraph MCP server (code intelligence for AI)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -84,6 +89,22 @@ jobs:
       # ── 6. Install Claude Code (AI backend) ─────────────────────────────────
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "Claude Code install skipped (pre-installed)"
+
+      # ── 6b. Set up Codegraph MCP server (optional) ──────────────────────────
+      - name: Set up Codegraph
+        run: |
+          if [ "${{ github.event.inputs.enable_codegraph }}" = "true" ]; then
+            curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+            echo "Codegraph installed: $(which codegraph)"
+            codegraph init -i ${{ github.workspace }}
+            echo "Codegraph initialized on workspace"
+            mkdir -p ~/.claude
+            printf '{\n  "mcpServers": {\n    "codegraph": {\n      "type": "stdio",\n      "command": "codegraph",\n      "args": ["serve", "--mcp"],\n      "cwd": "%s"\n    }\n  }\n}\n' "${{ github.workspace }}" > ~/.claude.json
+            echo "Claude Code MCP configured:"
+            cat ~/.claude.json
+          else
+            echo "Codegraph disabled — skipping"
+          fi
 
       # ── 7. Resolve target commit ────────────────────────────────────────────
       - name: Set target commit
