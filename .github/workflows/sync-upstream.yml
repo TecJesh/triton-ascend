@@ -5,6 +5,7 @@
 #
 # Required GitHub Secret (Settings → Secrets and variables → Actions):
 #   ANTHROPIC_API_KEY  — DeepSeek API key (used via Anthropic-compatible API)
+#   SYNC_PAT           — PAT with repo scope (push workflow-file changes)
 #
 # The workflow:
 #   1. Checks out your triton-ascend fork
@@ -149,7 +150,7 @@ jobs:
           # PR creation
           PUSH_TO_GITHUB: "true"
           GITHUB_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
 
           # Skip build & test on CI (no NPU)
           SKIP_BUILD: "true"
