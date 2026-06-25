@@ -775,6 +775,12 @@ CONSTRAINTS = {
         "example":
         "triton.language.sort",
     },
+    "triton.language.topk": {
+        "constraints": [
+            "DataType: Ascend does not support bool, fp64, int32, int64, uint8 (hardware limitation).",
+        ],
+        "example": "triton.language.topk",
+    },
     "triton.language.extra.cann.extension.sort": {
         "constraints": [
             "DataType: Ascend does not support bool, fp64, int32, int64, uint8 (hardware limitation).",
