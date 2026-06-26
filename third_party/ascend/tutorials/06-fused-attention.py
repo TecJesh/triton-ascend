@@ -37,10 +37,6 @@ import torch_npu
 import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as extension
-<<<<<<< HEAD
-=======
-
->>>>>>> release-3.2.2-0625-b79d137
 
 DEVICE = "npu"
 
@@ -288,36 +284,18 @@ class _attention(torch.autograd.Function):
         acc = torch.zeros((q.shape[0], q.shape[1], q.shape[2], HEAD_DIM_K), dtype=torch.float32, device=q.device)
         M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
-<<<<<<< HEAD
         _attn_fwd[(num_cores, )](q, k, v, M, out, acc, sm_scale, q.stride(0), q.stride(1), q.stride(2), q.stride(3),
                                  k.stride(0), k.stride(1), k.stride(2), k.stride(3), v.stride(0), v.stride(1),
                                  v.stride(2), v.stride(3), out.stride(0), out.stride(1), out.stride(2), out.stride(3),
                                  q.shape[0], q.shape[1], N_CTX=q.shape[2], HEAD_DIM=HEAD_DIM_K, BLOCK_M=BM, BLOCK_N=BN,
                                  STAGE=stage, **extra_kern_args)
-=======
-        _attn_fwd[(num_cores,)](
-            q, k, v, M, out, acc, sm_scale,
-            q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-            k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-            v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-            out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-            q.shape[0], q.shape[1], N_CTX=q.shape[2],
-            HEAD_DIM=HEAD_DIM_K,
-            BLOCK_M=BM,
-            BLOCK_N=BN,
-            STAGE=stage,
-            **extra_kern_args)
->>>>>>> release-3.2.2-0625-b79d137
 
         ctx.save_for_backward(q, k, v, out, M)
         ctx.sm_scale = sm_scale
         ctx.HEAD_DIM = HEAD_DIM_K
         ctx.causal = causal
         return out
-<<<<<<< HEAD
 
-=======
->>>>>>> release-3.2.2-0625-b79d137
 
 attention = _attention.apply
 

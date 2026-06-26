@@ -22,8 +22,6 @@ import unittest.mock as mock
 
 import pytest
 import torch
-<<<<<<< HEAD
-=======
 
 
 def _serialize_vector_axes(vector_axes):
@@ -65,7 +63,6 @@ def _get_semantic_axes_state(result: dict):
         "low_dim_axes": list(result.get("low_dim_axes", []) or []),
         "reduction_axes": list(result.get("reduction_axes", []) or []),
     }
->>>>>>> release-3.2.2-0625-b79d137
 
 
 def MockAutoTilingTunerRun(self, *args, **kwargs):
@@ -84,14 +81,6 @@ def MockAutoTilingTunerRun(self, *args, **kwargs):
     has_semantic_axes = bool(vector_axes["axis_length_exprs"])
     semantic_state = _get_semantic_axes_state({"keys": getattr(self, "keys", None), "vector_axes": vector_axes})
     return {
-<<<<<<< HEAD
-        "keys": self.keys,
-        "split_params": self.split_params,
-        "tiling_params": self.tiling_params,
-        "low_dim_axes": self.low_dim_axes,
-        "reduction_axes": self.reduction_axes,
-        "persistent_reduction": self.persistent_reduction,
-=======
         "keys": semantic_state["keys"] if has_semantic_axes else self.keys,
         "vector_axes": vector_axes,
         "split_params": semantic_state["split_params"] if has_semantic_axes else self.split_params,
@@ -102,7 +91,6 @@ def MockAutoTilingTunerRun(self, *args, **kwargs):
         "cv_parse_result": getattr(self, "cv_parse_result", None),
         "vv_parse_result_v2": getattr(self, "vv_parse_result_v2", None),
         "vv_adapter_result_v2": getattr(self, "vv_adapter_result_v2", None),
->>>>>>> release-3.2.2-0625-b79d137
     }
 
 
@@ -126,18 +114,9 @@ def check_axes_parse_res(act: dict, ref: dict):
             return sym[1:]
         raise KeyError(sym)
 
-<<<<<<< HEAD
-    assert set(ref_keys.values()) == set(act_keys.values()), \
-        f"Semantic dimensions mismatch: ref={set(ref_keys.values())}, act={set(act_keys.values())}"
-
-=======
->>>>>>> release-3.2.2-0625-b79d137
     def normalize_param_dict(param_dict: dict, sym_to_sem: dict) -> dict:
         """Convert {symbol: value} -> {semantic: value}"""
-        return {
-            sym_to_sem[resolve_symbol(sym, sym_to_sem)]: value
-            for sym, value in param_dict.items()
-        }
+        return {sym_to_sem[resolve_symbol(sym, sym_to_sem)]: value for sym, value in param_dict.items()}
 
     ref_split = normalize_param_dict(ref_state["split_params"], ref_axis_lengths)
     act_split = normalize_param_dict(act_state["split_params"], act_axis_lengths)
@@ -154,12 +133,6 @@ def check_axes_parse_res(act: dict, ref: dict):
     ref_red = normalize_axis_list(ref_state["reduction_axes"], ref_axis_lengths)
     act_red = normalize_axis_list(act_state["reduction_axes"], act_axis_lengths)
 
-<<<<<<< HEAD
-    ref_red = normalize_axis_list(ref["reduction_axes"], ref_keys)
-    act_red = normalize_axis_list(act["reduction_axes"], act_keys)
-
-=======
->>>>>>> release-3.2.2-0625-b79d137
     # Compare normalized structures
     assert ref_split == act_split, f"split_params mismatch: {ref_split} vs {act_split}"
     assert ref_tiling == act_tiling, f"tiling_params mismatch: {ref_tiling} vs {act_tiling}"
@@ -169,18 +142,10 @@ def check_axes_parse_res(act: dict, ref: dict):
 
 @pytest.fixture
 def mock_autotuner():
-<<<<<<< HEAD
     with mock.patch("triton.backends.ascend.runtime.autotuner.AutoTilingTuner.run", new=MockAutoTilingTunerRun):
         yield
 
 
-=======
-    with mock.patch(
-        "triton.backends.ascend.runtime.autotuner.AutoTilingTuner.run",
-        new=MockAutoTilingTunerRun
-    ):
-        yield
->>>>>>> release-3.2.2-0625-b79d137
 def generate_tensor(shape, dtype):
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
         return torch.randn(size=shape, dtype=eval('torch.' + dtype))

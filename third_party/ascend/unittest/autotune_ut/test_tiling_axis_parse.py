@@ -27,16 +27,11 @@ import triton.language as tl
 
 def test_tiling_axis_parse_base_case1(mock_autotuner):
     import triton.backends.ascend.runtime
-<<<<<<< HEAD
 
-    @triton.autotune(configs=[], key=["n_elements"])
-=======
-    
     @triton.autotune(
         configs=[],
         key=["n_elements"],
     )
->>>>>>> release-3.2.2-0625-b79d137
     @triton.jit
     def triton_tiling_axis_parse_base_case1(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
                                             BLOCK_SUB: tl.constexpr):
@@ -76,9 +71,8 @@ def test_tiling_axis_parse_kernel_type_vector_auto_consistency(mock_autotuner, k
         hints={"kernel_type": kernel_type},
     )
     @triton.jit
-    def triton_tiling_axis_parse_kernel_type_vector_auto_consistency(
-        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr
-    ):
+    def triton_tiling_axis_parse_kernel_type_vector_auto_consistency(x_ptr, y_ptr, output_ptr, n_elements,
+                                                                     BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr):
         offset = tl.program_id(axis=0) * BLOCK_SIZE
         base = tl.arange(0, BLOCK_SUB)
         loops = (BLOCK_SIZE + BLOCK_SUB - 1) // BLOCK_SUB
@@ -96,7 +90,7 @@ def test_tiling_axis_parse_kernel_type_vector_auto_consistency(mock_autotuner, k
         "low_dim_axes": ["x"],
         "reduction_axes": [],
     }
-    grid = lambda meta: (meta["BLOCK_SIZE"],)
+    grid = lambda meta: (meta["BLOCK_SIZE"], )
     act_res = triton_tiling_axis_parse_kernel_type_vector_auto_consistency[grid]()
     check_axes_parse_res(act_res, ref_res)
 

@@ -1,9 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
-<<<<<<< HEAD
 # Copyright 2018-2020 Philippe Tillet
 # Copyright 2020-2022 OpenAI
-=======
->>>>>>> release-3.2.2-0625-b79d137
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,31 +19,16 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-<<<<<<< HEAD
-=======
-
->>>>>>> release-3.2.2-0625-b79d137
 """
 Libdevice (`tl.extra.libdevice`) function
 ==============================
 """
-<<<<<<< HEAD
-=======
-import inspect
-import os
-from pathlib import Path
-
->>>>>>> release-3.2.2-0625-b79d137
 import torch
 import torch_npu
 
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
-<<<<<<< HEAD
-=======
-from triton.backends.ascend.compiler import get_libdevice
->>>>>>> release-3.2.2-0625-b79d137
 
 DEV = "npu"
 
@@ -67,29 +49,18 @@ def asin_kernel(
     tl.store(y_ptr + offsets, x, mask=mask)
 
 
-<<<<<<< HEAD
 def test_asin_kernel_matches_torch():
     size = 98432
     torch.manual_seed(0)
     x = torch.rand(size, device=DEV)
     output_triton = torch.empty_like(x)
     output_torch = torch.asin(x)
-=======
-def test():
-    torch.manual_seed(0)
-    size = 98432
-    x = torch.rand(size, device=DEV)
-    output_triton = torch.zeros(size, device=DEV)
-    output_torch = torch.asin(x)
-    assert x.device.type == DEV and output_triton.device.type == DEV
->>>>>>> release-3.2.2-0625-b79d137
     n_elements = output_torch.numel()
 
     def grid(meta):
         return (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
 
     asin_kernel[grid](x, output_triton, n_elements, BLOCK_SIZE=1024)
-<<<<<<< HEAD
     torch.testing.assert_close(output_torch, output_triton, rtol=1e-4, atol=1e-4)
     # Demo-style print
     torch.manual_seed(0)
@@ -111,26 +82,3 @@ def test():
 if __name__ == "__main__":
     test_asin_kernel_matches_torch()
     print("======Extern Functions Test Passed!======")
-=======
-    print(output_torch)
-    print(output_triton)
-    print(f'The maximum difference between torch and triton is '
-        f'{torch.max(torch.abs(output_torch - output_triton))}')
-
-
-    current_file = inspect.getfile(inspect.currentframe())
-    current_dir = Path(os.path.dirname(os.path.abspath(current_file)))
-    extern_libs = {'libdevice': get_libdevice()}
-
-    output_triton = torch.empty_like(x)
-    asin_kernel[grid](x, output_triton, n_elements, BLOCK_SIZE=1024, extern_libs=extern_libs)
-    torch.testing.assert_close(output_torch, output_triton, rtol=1e-4, atol=1e-4)
-    print(output_torch)
-    print(output_triton)
-    print(f'The maximum difference between torch and triton is '
-        f'{torch.max(torch.abs(output_torch - output_triton))}')
-
-
-if __name__ == "__main__":
-    test()
->>>>>>> release-3.2.2-0625-b79d137

@@ -190,7 +190,6 @@ def matmul(a, b, activation=""):
 # ---------
 #
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
-<<<<<<< HEAD
 
 
 def test_matrix_multiplication():
@@ -210,20 +209,3 @@ def test_matrix_multiplication():
 if __name__ == "__main__":
     test_matrix_multiplication()
     print("======Matrix Multiplication Test Passed!======")
-=======
-def test():
-    activation = "leaky_relu_custom"
-    torch.manual_seed(0)
-    a = torch.randn((512, 512), device=DEV, dtype=torch.float16)
-    b = torch.randn((512, 512), device=DEV, dtype=torch.float16)
-    triton_output = matmul(a, b, activation)
-    torch_output = torch_matmul(a, b, activation)
-    print(f"triton_output_with_fp16_inputs={triton_output}")
-    print(f"torch_output_with_fp16_inputs={torch_output}")
-    torch.testing.assert_close(triton_output, torch_output, atol=1e-3, rtol=1e-3)
-    print("Passed")
-
-
-if __name__ == "__main__":
-    test()
->>>>>>> release-3.2.2-0625-b79d137

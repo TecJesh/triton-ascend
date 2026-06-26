@@ -18,10 +18,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-<<<<<<< HEAD
-=======
-
->>>>>>> release-3.2.2-0625-b79d137
 """
 Group GEMM
 ============================
@@ -166,11 +162,7 @@ def group_gemm_fn(group_A, group_B):
     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
 
     def grid(meta):
-<<<<<<< HEAD
         return (meta['NUM_SM'], )
-=======
-        return (meta['NUM_SM'],)
->>>>>>> release-3.2.2-0625-b79d137
 
     grouped_matmul_kernel[grid](
         d_a_ptrs,
@@ -184,53 +176,12 @@ def group_gemm_fn(group_A, group_B):
     return group_C
 
 
-<<<<<<< HEAD
 def triton_perf_fn(a_ptrs, b_ptrs, c_ptrs, sizes, lds, group_size):
 
     def grid(meta):
         return (meta['NUM_SM'], )
 
     grouped_matmul_kernel[grid](a_ptrs, b_ptrs, c_ptrs, sizes, lds, group_size)
-=======
-def test():
-    group_m = [1024, 512, 256, 128]
-    group_n = [1024, 512, 256, 128]
-    group_k = [1024, 512, 256, 128]
-    group_A = []
-    group_B = []
-    assert len(group_m) == len(group_n)
-    assert len(group_n) == len(group_k)
-    group_size = len(group_m)
-    for i in range(group_size):
-        M = group_m[i]
-        N = group_n[i]
-        K = group_k[i]
-        A = torch.rand((M, K), device=DEV, dtype=torch.float16)
-        B = torch.rand((K, N), device=DEV, dtype=torch.float16)
-        group_A.append(A)
-        group_B.append(B)
-
-    tri_out = group_gemm_fn(group_A, group_B)
-    ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
-    for i in range(group_size):
-        torch.testing.assert_close(ref_out[i], tri_out[i], atol=1e-2, rtol=1e-3)
-    print("Passed")
-
-
-def triton_perf_fn(a_ptrs, b_ptrs, c_ptrs, sizes, lds, group_size):
-
-    def grid(meta):
-        return (meta['NUM_SM'],)
-
-    grouped_matmul_kernel[grid](
-        a_ptrs,
-        b_ptrs,
-        c_ptrs,
-        sizes,
-        lds,
-        group_size,
-    )
->>>>>>> release-3.2.2-0625-b79d137
 
 
 def torch_perf_fn(group_A, group_B):
@@ -238,39 +189,16 @@ def torch_perf_fn(group_A, group_B):
         torch.matmul(a, b)
 
 
-<<<<<<< HEAD
 def run_benchmark_case(N, provider):
     group_size = 4
     group_A = []
     group_B = []
     group_C = []
-=======
-@triton.testing.perf_report(
-    triton.testing.Benchmark(
-        x_names=['N'],
-        x_vals=[2**i for i in range(7, 11)],
-        line_arg='provider',
-        line_vals=['torch', 'triton'],
-        line_names=["Torch", "Triton"],
-        styles=[('green', '-'), ('blue', '-')],
-        ylabel="runtime(ms)",
-        plot_name="group-gemm-performance",
-        args={},
-    ))
-def benchmark(N, provider):
-    group_size = 4
-    group_A = []
-    group_B = []
->>>>>>> release-3.2.2-0625-b79d137
     A_addrs = []
     B_addrs = []
     C_addrs = []
     g_sizes = []
     g_lds = []
-<<<<<<< HEAD
-=======
-    group_C = []
->>>>>>> release-3.2.2-0625-b79d137
     for _ in range(group_size):
         A = torch.rand((N, N), device=DEV, dtype=torch.float16)
         B = torch.rand((N, N), device=DEV, dtype=torch.float16)
@@ -302,7 +230,6 @@ def benchmark(N, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(bench_torch, quantiles=quantiles)
     if provider == 'triton':
         ms, min_ms, max_ms = triton.testing.do_bench(bench_triton, quantiles=quantiles)
-<<<<<<< HEAD
     assert ms >= 0
     assert min_ms >= 0
     assert max_ms >= 0
@@ -349,10 +276,3 @@ def test_grouped_gemm_tutorial_example():
 if __name__ == "__main__":
     test_grouped_gemm_tutorial_example()
     print("======Grouped GEMM Test Passed!======")
-=======
-    return ms, max_ms, min_ms
-
-
-if __name__ == "__main__":
-    test()
->>>>>>> release-3.2.2-0625-b79d137

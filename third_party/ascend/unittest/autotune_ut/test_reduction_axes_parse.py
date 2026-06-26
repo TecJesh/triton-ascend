@@ -26,6 +26,7 @@ import triton.language as tl
 
 
 def assert_outward_semantic_axes_state(act_res, ref_res):
+
     def normalize_axes(axis_names, keys):
         normalized = []
         for axis in axis_names:
@@ -41,9 +42,8 @@ def assert_outward_semantic_axes_state(act_res, ref_res):
     assert act_res["split_params"] == ref_res["split_params"]
     assert act_res["tiling_params"] == ref_res["tiling_params"]
     assert act_res["low_dim_axes"] == ref_res["low_dim_axes"]
-    assert normalize_axes(act_res["reduction_axes"], act_res["keys"]) == normalize_axes(
-        ref_res["reduction_axes"], ref_res["keys"]
-    )
+    assert normalize_axes(act_res["reduction_axes"],
+                          act_res["keys"]) == normalize_axes(ref_res["reduction_axes"], ref_res["keys"])
 
 
 def assert_vv_parser_semantic_axes_state(act_res, ref_res):
@@ -59,14 +59,10 @@ def assert_vv_parser_semantic_axes_state(act_res, ref_res):
 def test_triton_max_last_dim_case1(mock_autotuner):
     import triton.backends.ascend.runtime
 
-<<<<<<< HEAD
-    @triton.autotune(configs=[], key=["x0_numel", "r1_numel"])
-=======
     @triton.autotune(
         configs=[],
         key=["x0_numel", "r1_numel"],
     )
->>>>>>> release-3.2.2-0625-b79d137
     @triton.jit
     def triton_max_last_dim1(
         in_ptr0,
@@ -113,14 +109,10 @@ def test_triton_max_last_dim_case1(mock_autotuner):
 def test_triton_max_last_dim_case2(mock_autotuner):
     import triton.backends.ascend.runtime
 
-<<<<<<< HEAD
-    @triton.autotune(configs=[], key=["x0_numel", "r1_numel"])
-=======
     @triton.autotune(
         configs=[],
         key=["x0_numel", "r1_numel"],
     )
->>>>>>> release-3.2.2-0625-b79d137
     @triton.jit
     def triton_max_last_dim2(
         in_ptr0,
@@ -167,14 +159,10 @@ def test_triton_max_last_dim_case2(mock_autotuner):
 def test_triton_max_last_dim_case3(mock_autotuner):
     import triton.backends.ascend.runtime
 
-<<<<<<< HEAD
-    @triton.autotune(configs=[], key=["x0_numel", "r1_numel"])
-=======
     @triton.autotune(
         configs=[],
         key=["x0_numel", "r1_numel"],
     )
->>>>>>> release-3.2.2-0625-b79d137
     @triton.jit
     def triton_max_last_dim3(
         in_ptr0,
@@ -261,7 +249,7 @@ def test_reduction_axes_parse_kernel_type_vector_auto_consistency(mock_autotuner
         "low_dim_axes": ["y"],
         "reduction_axes": ["y"],
     }
-    grid = lambda meta: (meta["X0BLOCK"],)
+    grid = lambda meta: (meta["X0BLOCK"], )
     act_res = triton_reduction_axes_parse_kernel_type_vector_auto_consistency[grid]()
     assert_outward_semantic_axes_state(act_res, ref_res)
     assert_vv_parser_semantic_axes_state(act_res, ref_res)

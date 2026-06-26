@@ -19,10 +19,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-<<<<<<< HEAD
-=======
-
->>>>>>> release-3.2.2-0625-b79d137
 """
 Low-Memory Dropout
 ==================
@@ -108,7 +104,6 @@ def seeded_dropout(x, p, seed):
     return output
 
 
-<<<<<<< HEAD
 def test_dropout_matches_reference():
     shape, p = (256, ), 0.5
     torch.manual_seed(0)
@@ -126,42 +121,9 @@ def test_dropout_matches_reference():
             ["input"] + x_demo.tolist(),
             ["keep mask"] + x_keep_demo.tolist(),
             ["output"] + output_demo.tolist(),
-=======
-def test():
-    # Input tensor
-    x = torch.randn(size=(10, ), device=DEV)
-    # Dropout mask
-    p = 0.5
-    x_keep = (torch.rand(size=(10, ), device=DEV) > p).to(torch.int32)
-    #
-    output = dropout(x, x_keep=x_keep, p=p)
-    print(tabulate.tabulate([
-        ["input"] + x.tolist(),
-        ["keep mask"] + x_keep.tolist(),
-        ["output"] + output.tolist(),
-    ]))
-
-
-    x = torch.randn(size=(10, ), device=DEV)
-    # Compare this to the baseline - dropout mask is never instantiated!
-    output = seeded_dropout(x, p=0.5, seed=123)
-    output2 = seeded_dropout(x, p=0.5, seed=123)
-    output3 = seeded_dropout(x, p=0.5, seed=512)
-
-    print(
-        tabulate.tabulate([
-            ["input"] + x.tolist(),
-            ["output (seed = 123)"] + output.tolist(),
-            ["output (seed = 123)"] + output2.tolist(),
-            ["output (seed = 512)"] + output3.tolist(),
->>>>>>> release-3.2.2-0625-b79d137
         ]))
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     test_dropout_matches_reference()
     print("======Low Memory Dropout Test Passed!======")
-=======
-    test()
->>>>>>> release-3.2.2-0625-b79d137

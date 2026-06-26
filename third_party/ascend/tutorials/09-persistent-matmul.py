@@ -19,10 +19,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-<<<<<<< HEAD
-=======
-
->>>>>>> release-3.2.2-0625-b79d137
 """
 Persistent Matmul
 =====================
@@ -201,19 +197,11 @@ def matmul_kernel_persistent(
 def get_configs(dtype):
     return {
         torch.float16: {
-<<<<<<< HEAD
             "BLOCK_SIZE_M": 64,
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 32,
             "GROUP_SIZE_M": 4,
             "num_stages": 2,
-=======
-            "BLOCK_SIZE_M": 128,
-            "BLOCK_SIZE_N": 256,
-            "BLOCK_SIZE_K": 64,
-            "GROUP_SIZE_M": 8,
-            "num_stages": 3,
->>>>>>> release-3.2.2-0625-b79d137
             "num_warps": 8,
         }
     }[dtype]
@@ -322,7 +310,6 @@ def validate(M, N, K):
     persistent_vs_torch = "✅" if torch.allclose(persistent_result, torch_result, atol=1.0) else "❌"
     naive_vs_persistent = "✅" if torch.allclose(naive_result, persistent_result, atol=1.0) else "❌"
 
-<<<<<<< HEAD
     print(f"M={M}, N={N}, K={K} verification naive vs torch: {naive_vs_torch} "
           f"persistent vs torch: {persistent_vs_torch} naive vs persistent: {naive_vs_persistent}")
     return torch_result, naive_result, persistent_result
@@ -340,29 +327,3 @@ def test_persistent_matmul_validate_cases():
 if __name__ == "__main__":
     test_persistent_matmul_validate_cases()
     print("======Persistent MatMul Test Passed!======")
-=======
-    print(
-        f"M={M}, N={N}, K={K} verification naive vs torch: {naive_vs_torch} "
-        f"persistent vs torch: {persistent_vs_torch} naive vs persistent: {naive_vs_persistent}"
-    )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-K", type=int, required=False, default=512)
-    parser.add_argument("--K_range", type=int, nargs=2)
-    parser.add_argument("--K_step", type=int, default=512)
-    args = parser.parse_args()
-
-    if args.K and args.K_range is None:
-        args.K_range = [args.K, args.K]
-        args.K_step = 1
-
-    torch.manual_seed(0)
-
-    validate(32, 32, 32)
-    validate(8192, 8192, 512)
-
-    for K in range(args.K_range[0], args.K_range[1] + 1, args.K_step):
-        bench(K)
->>>>>>> release-3.2.2-0625-b79d137
