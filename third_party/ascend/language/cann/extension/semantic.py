@@ -53,9 +53,6 @@ class PIPE(enum.Enum):
     PIPE_FIX = ascend_ir.PIPE.PIPE_FIX
 
 
-<<<<<<< HEAD
-def create_sync_block_set(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _semantic=None):
-=======
 class SYNC_HINT(enum.Enum):
     WAIT = ascend_ir.SYNC_HINT.wait
     SET = ascend_ir.SYNC_HINT.set
@@ -74,7 +71,6 @@ class EVENT_ID(enum.Enum):
 
 
 def create_sync_block_set(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _builder=None):
->>>>>>> release-3.2.2-0625-b79d137
     if isinstance(event_id, int):
         _semantic.builder.sync_block_set(sender, receiver,
                                          _semantic.to_tensor(tl.constexpr(event_id)).handle, sender_pipe.value,

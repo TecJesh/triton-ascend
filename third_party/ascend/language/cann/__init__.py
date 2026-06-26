@@ -19,20 +19,14 @@
 # THE SOFTWARE.
 
 from triton.language import math
-<<<<<<< HEAD
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
-=======
->>>>>>> release-3.2.2-0625-b79d137
 
 from . import libdevice
 from . import extension
 
 extension.parallel = extension.aux_ops.parallel
-<<<<<<< HEAD
 if not triton_enable_libdevice_simt():
     libdevice.atan2 = extension.math_ops.atan2
-=======
->>>>>>> release-3.2.2-0625-b79d137
 libdevice.isfinited = extension.math_ops.isfinited
 libdevice.finitef = extension.math_ops.finitef
 libdevice.flip = extension.flip

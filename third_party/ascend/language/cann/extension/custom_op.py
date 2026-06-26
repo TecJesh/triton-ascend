@@ -50,10 +50,8 @@ def _validate_pipe(pipe):
         assert all(isinstance(p, core.PIPE) for p in pipe), \
             "macro custom op pipe sequence must contain PIPE values"
         return
-    assert False, (
-        "Invalid 'pipe' field: single PIPE lowers to hivm.hir.custom; "
-        "a sequence of two PIPE values lowers to hivm.hir.custom_macro"
-    )
+    assert False, ("Invalid 'pipe' field: single PIPE lowers to hivm.hir.custom; "
+                   "a sequence of two PIPE values lowers to hivm.hir.custom_macro")
 
 
 def _is_macro_pipe(pipe):
@@ -97,7 +95,10 @@ def _build_sync_event_slot_attr(slot, builder):
         assert False, "sync_event_slots entries must be SyncEventSlot or tuple"
 
     return builder.get_sync_event_slot_attr(
-        set_pipe, wait_pipe, macro_sync, event,
+        set_pipe,
+        wait_pipe,
+        macro_sync,
+        event,
     )
 
 
@@ -316,9 +317,7 @@ def _add_sync_event_slots_attr(op, builder, attrs):
     slots = getattr(op, 'sync_event_slots')
     if isinstance(slots, tuple):
         slots = list(slots)
-    attrs['sync_event_slots'] = builder.get_array_attr(
-        [_build_sync_event_slot_attr(slot, builder) for slot in slots]
-    )
+    attrs['sync_event_slots'] = builder.get_array_attr([_build_sync_event_slot_attr(slot, builder) for slot in slots])
 
 
 def _make_attrs(op, builder, is_macro):
@@ -401,21 +400,13 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     inputs = _args_to_operands(op, _semantic, args, kwargs)
     builder = getattr(_semantic.builder, '_ascend_builder')
     # Setup attributes.
-<<<<<<< HEAD
-    attrs = _make_attrs(op, builder)
-    arg_attrs = _make_arg_attrs(op, builder)
-    # Build IR for the custom op.
-    res = builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
-=======
     attrs = _make_attrs(op, _builder, is_macro)
     arg_attrs = _make_arg_attrs(op, _builder)
     # Build IR for the custom op.
     if is_macro:
-        res = _builder.create_custom_macro_op(
-            name, attrs, inputs, outputs, arg_attrs)
+        res = _builder.create_custom_macro_op(name, attrs, inputs, outputs, arg_attrs)
     else:
         res = _builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
->>>>>>> release-3.2.2-0625-b79d137
     # Results with same types as outputs.
     res_types = [out.type for out in outs]
     return _to_result(res, res_types)
