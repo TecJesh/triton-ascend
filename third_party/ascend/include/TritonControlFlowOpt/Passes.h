@@ -34,8 +34,4 @@ namespace triton {
 } // namespace triton
 } // namespace mlir
 
-<<<<<<< HEAD:third_party/ascend/include/TritonAffinityOpt/Passes.h
-#endif // TRITON_ADAPTER_TRITON_AFFINITY_OPTIMIZATION_PASSES_H
-=======
 #endif // TRITON_ADAPTER_TRITON_CONTROL_FLOW_OPT_PASSES_H
->>>>>>> release-3.2.2-0625-b79d137:third_party/ascend/include/TritonControlFlowOpt/Passes.h

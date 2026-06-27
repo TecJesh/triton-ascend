@@ -270,15 +270,10 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
                    RewriterBase &rewriter,
                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
 
-<<<<<<< HEAD
-void parseCustomOp(hivm::CustomOp op, const Location &loc,
-                   RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
-                   unsigned resultIdx);
-=======
-void parseStructuredCustomOp(Operation *op, const Location &loc, RewriterBase &rewriter,
-                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned resultIdx);
->>>>>>> release-3.2.2-0625-b79d137
+void parseStructuredCustomOp(Operation *op, const Location &loc,
+                             RewriterBase &rewriter,
+                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                             unsigned resultIdx);
 } // namespace triton
 
 } // namespace mlir

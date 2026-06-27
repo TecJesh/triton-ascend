@@ -257,18 +257,11 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
         parseExtractSlice(extractSliceOp, loc, rewriter, offsetMap);
       } else if (auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(defOp)) {
         parseInsertSlice(insertSliceOp, loc, rewriter, offsetMap);
-<<<<<<< HEAD
-      } else if (auto customOp = dyn_cast<hivm::CustomOp>(defOp)) {
+      } else if (isDistributedTypeCustomOp(defOp)) {
         auto opResult = dyn_cast<OpResult>(operand);
         assert(opResult && "Expected operand to be an OpResult");
-        unsigned resultIdx = opResult.getResultNumber();
-        parseCustomOp(customOp, loc, rewriter, offsetMap, resultIdx);
-=======
-      } else if (isDistributedTypeCustomOp(defOp)) {
-          auto opResult = dyn_cast<OpResult>(operand);
-          assert(opResult && "Expected operand to be an OpResult");
-          parseStructuredCustomOp(defOp, loc, rewriter, offsetMap, opResult.getResultNumber());
->>>>>>> release-3.2.2-0625-b79d137
+        parseStructuredCustomOp(defOp, loc, rewriter, offsetMap,
+                                opResult.getResultNumber());
       }
     }
   } else if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
@@ -832,12 +825,8 @@ void parseSelect(arith::SelectOp op, const Location &loc,
   if (!dstType)
     return;
 
-<<<<<<< HEAD
   auto dstIsScalar =
       trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
-=======
-  auto dstIsScalar = trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
->>>>>>> release-3.2.2-0625-b79d137
   offsetMap[dst].setScalarLike(dstIsScalar);
 
   auto &dstStructured = offsetMap[dst].getStructuredRef();
@@ -1181,11 +1170,11 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
   offsetMap[dst].setScalarLike(true);
 }
 
-<<<<<<< HEAD
-void parseCustomOp(hivm::CustomOp op, const Location &loc,
-                   RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
-                   unsigned int resultIdx) {
+namespace {
+template <typename CustomOpT>
+void parseStructuredCustomOpImpl(
+    CustomOpT op, const Location &loc, RewriterBase &rewriter,
+    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx) {
   for (auto operand : op.getInputs()) {
     parse(operand, op->getLoc(), rewriter, offsetMap);
   }
@@ -1199,17 +1188,17 @@ void parseCustomOp(hivm::CustomOp op, const Location &loc,
     } else if (isa<IntegerType>(dst.getType())) {
       offsetMap[dst].setOffset(dst);
     } else {
-      emitError(loc) << "Unsupported return type for hivm.custom: "
+      emitError(loc) << "Unsupported return type for hivm custom op: "
                      << dst.getType();
     }
     return;
   }
   if (llvm::isa<triton::PointerType>(tensorType.getElementType())) {
     if (checkStructureAnnotated(op, rewriter)) {
-      auto srcValArrayAttr = op->getAttrOfType<DenseI32ArrayAttr>(
+      auto srcValArrayAttr = op->template getAttrOfType<DenseI32ArrayAttr>(
           ConverterUtils::customSrcPtrIndexAttrName);
       assert(srcValArrayAttr &&
-             "structure hivm.custom op should present src tensor<tt.ptr>");
+             "structure hivm custom op should present src tensor<tt.ptr>");
       auto srcValArray = srcValArrayAttr.asArrayRef();
       assert(srcValArray[resultIdx] != -1 &&
              "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
@@ -1218,63 +1207,24 @@ void parseCustomOp(hivm::CustomOp op, const Location &loc,
       return;
     }
     emitError(loc) << "Unsupported return unstructure RankedTensor of tt.ptr "
-                      "for hivm.custom: "
+                      "for hivm custom op: "
                    << dst;
   }
   offsetMap[dst].setUnstructured(tensorType.getRank());
-=======
-namespace {
-template <typename CustomOpT>
-void parseStructuredCustomOpImpl(CustomOpT op, const Location &loc, RewriterBase &rewriter,
-                                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx)
-{
-    for (auto operand : op.getInputs()) {
-        parse(operand, op->getLoc(), rewriter, offsetMap);
-    }
-    auto dst = op->getResult(resultIdx);
-    offsetMap[dst] = PtrOffsetInfo();
-    auto tensorType = dyn_cast<RankedTensorType>(dst.getType());
-    if (!tensorType) {
-        if (isa<triton::PointerType>(dst.getType())) {
-            offsetMap[dst].setPtr(dst);
-            offsetMap[dst].setZeroOffset();
-        } else if (isa<IntegerType>(dst.getType())) {
-            offsetMap[dst].setOffset(dst);
-        } else {
-            emitError(loc) << "Unsupported return type for hivm custom op: " << dst.getType();
-        }
-        return;
-    }
-    if (llvm::isa<triton::PointerType>(tensorType.getElementType())) {
-        if (checkStructureAnnotated(op, rewriter)) {
-            auto srcValArrayAttr =
-                op->template getAttrOfType<DenseI32ArrayAttr>(ConverterUtils::customSrcPtrIndexAttrName);
-            assert(srcValArrayAttr && "structure hivm custom op should present src tensor<tt.ptr>");
-            auto srcValArray = srcValArrayAttr.asArrayRef();
-            assert(srcValArray[resultIdx] != -1 && "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
-            auto srcOffsetInfo = offsetMap[op->getOperand(srcValArray[resultIdx])];
-            offsetMap[dst] = srcOffsetInfo;
-            return;
-        }
-        emitError(loc) << "Unsupported return unstructure RankedTensor of tt.ptr "
-                          "for hivm custom op: "
-                       << dst;
-    }
-    offsetMap[dst].setUnstructured(tensorType.getRank());
 }
 } // namespace
 
-void parseStructuredCustomOp(Operation *op, const Location &loc, RewriterBase &rewriter,
-                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx)
-{
-    if (auto customOp = dyn_cast<hivm::CustomOp>(op)) {
-        parseStructuredCustomOpImpl(customOp, loc, rewriter, offsetMap, resultIdx);
-    } else if (auto macroOp = dyn_cast<hivm::CustomMacroOp>(op)) {
-        parseStructuredCustomOpImpl(macroOp, loc, rewriter, offsetMap, resultIdx);
-    } else {
-        llvm_unreachable("expected hivm custom op");
-    }
->>>>>>> release-3.2.2-0625-b79d137
+void parseStructuredCustomOp(Operation *op, const Location &loc,
+                             RewriterBase &rewriter,
+                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                             unsigned int resultIdx) {
+  if (auto customOp = dyn_cast<hivm::CustomOp>(op)) {
+    parseStructuredCustomOpImpl(customOp, loc, rewriter, offsetMap, resultIdx);
+  } else if (auto macroOp = dyn_cast<hivm::CustomMacroOp>(op)) {
+    parseStructuredCustomOpImpl(macroOp, loc, rewriter, offsetMap, resultIdx);
+  } else {
+    llvm_unreachable("expected hivm custom op");
+  }
 }
 
 } // namespace triton
