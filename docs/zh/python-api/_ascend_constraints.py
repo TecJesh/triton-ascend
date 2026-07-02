@@ -74,7 +74,7 @@ CONSTRAINTS = {
     },
     "triton.language.add": {
         "constraints": [
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support fp8/fp64.",
         ],
         "example": "triton.language.add",
     },
@@ -297,11 +297,9 @@ CONSTRAINTS = {
     },
     "triton.language.div": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support uint8/uint16/uint32/uint64/fp8/fp64.",
         ],
-        "example":
-        "triton.language.div",
+        "example": "triton.language.div",
     },
     "triton.language.div_rn": {
         "constraints": [],
@@ -504,7 +502,7 @@ CONSTRAINTS = {
     },
     "triton.language.floordiv": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64.",
         ],
         "example": "triton.language.floordiv",
     },
@@ -681,8 +679,8 @@ CONSTRAINTS = {
     },
     "triton.language.mod": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp8/fp64, \
+                Ascend 950 does not support fp8/fp64.",
         ],
         "example":
         "triton.language.mod",
@@ -855,7 +853,7 @@ CONSTRAINTS = {
     },
     "triton.language.sub": {
         "constraints": [
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support fp8/fp64.",
         ],
         "example": "triton.language.sub",
     },
