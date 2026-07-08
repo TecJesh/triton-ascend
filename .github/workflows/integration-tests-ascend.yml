@@ -6,6 +6,11 @@ on:
       matrix:
         required: true
         type: string
+      ref:
+        required: false
+        type: string
+        default: ''
+        description: 'Git ref to check out (branch, tag, or SHA). Defaults to the triggering ref.'
 
 jobs:
   integration-tests-ascend:
@@ -33,6 +38,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: "true"
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -79,6 +85,9 @@ jobs:
           ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
+      - name: Create log directory
+        run: mkdir -p /tmp/test-logs
+
       - name: Build and install triton-ascend
         shell: bash
         env:
@@ -103,21 +112,22 @@ jobs:
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           MAX_JOBS="$NUM_PROCS" \
-          ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl
+          ${PYTHON} setup.py bdist_wheel 2>&1 | tee /tmp/test-logs/build_wheel.log
+          ${PYTHON} -m pip install dist/*.whl 2>&1 | tee /tmp/test-logs/build_install.log
 
       - name: CCache stats
-        run: ccache --print-stats
+        run: ccache --print-stats 2>&1 | tee /tmp/test-logs/ccache_stats.log
 
       - name: Run unit tests on NPU
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          mkdir -p /tmp/test-logs
           NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut 2>&1 | tee /tmp/test-logs/pytest_ut.log
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut 2>&1 | tee /tmp/test-logs/autotune_ut.log
           # NOTE: kernel tests are temporarily disabled due to intermittent failures
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
@@ -127,10 +137,11 @@ jobs:
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          mkdir -p /tmp/test-logs
           TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
           echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
-            lit -v "${TEST_MLIR_DIR}"
+            lit -v "${TEST_MLIR_DIR}" 2>&1 | tee /tmp/test-logs/mlir_tests.log
           else
             echo "MLIR test directory not found."
             echo "Expected to match: build/cmake.*/third_party/ascend/unittest"
@@ -143,3 +154,11 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Upload test logs (for AI fix)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.config.name }}-py${{ matrix.python_version }}
+          path: /tmp/test-logs/
+          retention-days: 3
