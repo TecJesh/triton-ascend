@@ -42,6 +42,7 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -96,6 +97,27 @@ DenseI32ArrayAttr getFullBoundaryCheckAttr(ConversionPatternRewriter &rewriter,
     boundaryCheck.push_back(dim);
   }
   return rewriter.getDenseI32ArrayAttr(boundaryCheck);
+}
+
+// Check whether the block fully covers the tensor from the origin
+static bool isFullCoverage(ArrayRef<int64_t> blockShape,
+                           ArrayRef<Value> tensorShape, ValueRange indices) {
+  if (blockShape.size() != tensorShape.size() ||
+      blockShape.size() != indices.size())
+    return false;
+  for (auto [bs, ts, idx] : llvm::zip(blockShape, tensorShape, indices)) {
+    auto constOp = ts.getDefiningOp<arith::ConstantOp>();
+    if (!constOp)
+      return false;
+    auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue());
+    if (!intAttr || intAttr.getInt() != bs)
+      return false;
+    // Offset must be a statically-known zero
+    APInt offset;
+    if (!matchPattern(idx, m_ConstantInt(&offset)) || !offset.isZero())
+      return false;
+  }
+  return true;
 }
 
 Value expandOffsets(OpBuilder &builder, Location loc,
@@ -268,7 +290,9 @@ LogicalResult DescriptorLoadConverter::matchAndRewrite(
                                                computeOrder(blockShape) // order
       );
   // 3. replace tt.load
-  auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
+  auto boundaryCheck = isFullCoverage(blockShape, desc.shape, indices)
+                           ? rewriter.getDenseI32ArrayAttr({})
+                           : getFullBoundaryCheckAttr(rewriter, blockShape);
   triton::PaddingOptionAttr padding = desc.padding;
   auto cache = triton::CacheModifierAttr::get(rewriter.getContext(),
                                               triton::CacheModifier::NONE);
@@ -326,7 +350,9 @@ LogicalResult DescriptorStoreConverter::matchAndRewrite(
   auto maskType = RankedTensorType::get(blockShape, rewriter.getI1Type());
   rewriter.create<arith::ConstantOp>(loc,
                                      DenseElementsAttr::get(maskType, true));
-  auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
+  auto boundaryCheck = isFullCoverage(blockShape, desc.shape, indices)
+                           ? rewriter.getDenseI32ArrayAttr({})
+                           : getFullBoundaryCheckAttr(rewriter, blockShape);
   auto cacheModifier = triton::CacheModifierAttr::get(
       rewriter.getContext(), triton::CacheModifier::NONE);
   auto evictionPolicy = triton::EvictionPolicyAttr::get(

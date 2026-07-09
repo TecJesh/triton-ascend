@@ -225,6 +225,50 @@ def test_tensor_descriptor_padding(dtype, padding):
     torch.testing.assert_close(expected, out_device_tma, equal_nan=True)
 
 
+@pytest.mark.parametrize("dtype", ['float32', 'int32'])
+@pytest.mark.parametrize("offset", [16, 8])
+def test_tensor_descriptor_load_store_boundary_check(dtype, offset):
+
+    @triton.jit
+    def kernel(out_ptr, a_ptr, off: tl.constexpr, M: tl.constexpr, N: tl.constexpr):
+        in_desc = tl.make_tensor_descriptor(
+            a_ptr,
+            shape=[M, N],
+            strides=[N, 1],
+            block_shape=[M, N],
+            padding_option="zero",
+        )
+        out_desc = tl.make_tensor_descriptor(
+            out_ptr,
+            shape=[M, N],
+            strides=[N, 1],
+            block_shape=[M, N],
+        )
+        # block_shape == [M, N] and shape is constant -> "full coverage" looks
+        # true, but reading from row `off` extends past the last row.
+        block = in_desc.load([off, 0])
+        # offset 0 here IS full coverage -> boundary check may be dropped.
+        out_desc.store([0, 0], block)
+
+    def alloc_fn(size: int, alignment: int, stream):
+        return torch.empty(size, device="npu", dtype=torch.int8)
+
+    triton.set_allocator(alloc_fn)
+
+    M, N = 32, 32
+    sentinel_value = 8
+    backing = test_common.generate_tensor((2 * M, N), dtype).npu()
+    backing[M:2 * M, :] = sentinel_value
+    inp = backing[0:M, :]
+    out = inp.new_empty((M, N))
+
+    kernel[(1, )](out, backing, offset, M, N)
+
+    expected = torch.zeros((M, N), dtype=inp.dtype, device=inp.device)
+    expected[0:M - offset, :] = inp[offset:M, :]
+    torch.testing.assert_close(expected, out)
+
+
 @pytest.mark.parametrize("X, Y", [(128, 128)])
 @pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32)])
 @pytest.mark.parametrize("dtype", ['float32', 'int32'])
