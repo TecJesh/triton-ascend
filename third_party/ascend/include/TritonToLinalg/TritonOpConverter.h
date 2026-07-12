@@ -496,14 +496,6 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-class CatConverter : public OpConversionPattern<triton::CatOp> {
-public:
-  using OpConversionPattern<triton::CatOp>::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(triton::CatOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
-
 class GatherConverter : public OpConversionPattern<triton::GatherOp> {
 private:
   static constexpr llvm::StringRef gatherFuncNameBase = "triton_gather";

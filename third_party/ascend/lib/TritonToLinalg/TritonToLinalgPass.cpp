@@ -639,7 +639,7 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::TransposeConverter>(patterns.getContext());
   patterns.add<TTOpConverters::SplitConverter>(patterns.getContext());
   patterns.add<TTOpConverters::JoinConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::CatConverter>(patterns.getContext());
+
   patterns.add<TTOpConverters::BitcastConverter>(patterns.getContext());
   patterns.add<TTOpConverters::LoopConverter<scf::ForOp>>(
       patterns.getContext());
