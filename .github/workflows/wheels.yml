@@ -45,11 +45,23 @@ jobs:
           docker container prune -f
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch.ref }}
 
-      - uses: actions/setup-python@v5
+      # The LATEST_DATE here should be kept in sync with the one in Patch setup.py
+      - id: check-version
+        name: Check latest version
+        run: |
+          export PACKAGE_DATE=$(python3 -m pip install --user --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --dry-run triton-nightly== |& grep -oP '(?<=, )[0-9\.]+dev[0-9]+(?=\))' | grep -oP '(?<=dev)[0-9]+')
+          export LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
+          if cmp -s <(echo $PACKAGE_DATE) <(echo $LATEST_DATE); then
+            echo "new_commit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_commit=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 

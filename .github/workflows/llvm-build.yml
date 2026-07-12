@@ -42,7 +42,7 @@ jobs:
     steps:
 
     - name: Checkout Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         path: llvm-build
 
@@ -81,7 +81,7 @@ jobs:
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
     - name: Checkout LLVM
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: llvm/llvm-project
         path: llvm-project
@@ -104,7 +104,7 @@ jobs:
         fi
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
 
@@ -285,6 +285,7 @@ jobs:
         sudo chown -R "$(id -u -n):$(id -g -n)" "${{ env.SCCACHE_DIR }}"
 
         docker rm "${CONTAINER_ID}"
+
 
     - name: Configure, Build, Test, and Install LLVM (AlmaLinux)
       if: matrix.config.target-os == 'almalinux'
