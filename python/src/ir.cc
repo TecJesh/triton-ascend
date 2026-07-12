@@ -1908,7 +1908,7 @@ void init_triton_ir(py::module &&m) {
            })
       .def(
           "run",
-          [](PassManager &self, ModuleOp &mod) {
+          [](PassManager &self, ModuleOp &mod, std::string repro_pipeline_tag) {
             // TODO: maybe dump module to file and print error for better
             // diagnostics
 
@@ -1919,6 +1919,11 @@ void init_triton_ir(py::module &&m) {
             auto reproducerPath =
                 triton::tools::getStrEnv("TRITON_REPRODUCER_PATH");
             if (!reproducerPath.empty()) {
+              if (reproducerPath != "-") {
+                std::string repro_suffix =
+                    "." + repro_pipeline_tag + ".repro.mlir";
+                reproducerPath += repro_suffix;
+              }
               auto anchorName = self.getOpAnchorName();
               auto passes = self.getPasses();
               Operation *op = mod.getOperation();
