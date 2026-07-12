@@ -87,6 +87,7 @@ docs/sg_execution_times.rst
 .vscode
 .vs
 .idea/
+.cursor
 
 # Vim
 *.swp
