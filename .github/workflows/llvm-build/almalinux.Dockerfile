@@ -1,4 +1,5 @@
-FROM almalinux:8
+# https://github.com/AlmaLinux/container-images/blob/9f9b3c8c8cf4a57fd42f362570ff47c75788031f/default/amd64/Dockerfile
+FROM almalinux:8.10-20250411
 ARG llvm_dir=llvm-project
 # Add the cache artifacts and the LLVM source tree to the container
 COPY sccache /sccache
@@ -38,6 +39,7 @@ RUN cmake -GNinja -Bbuild \
   -DLLVM_ENABLE_TERMINFO=OFF \
   -DLLVM_INSTALL_UTILS=ON \
   -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+  -DLLVM_ENABLE_ZSTD=OFF \
   /source/llvm-project/llvm
 
 RUN ninja -C build install
