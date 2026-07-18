@@ -229,8 +229,6 @@ jobs:
           PUSH_TO_GITHUB: "true"
           GITHUB_REPO: triton-lang/triton-ascend
           TA_BASE_BRANCH: upstream-sync
-          PR_AUTHOR: TA
-          PR_TYPE: sync
           GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           # AI backend: Claude Code CLI wired to DeepSeek's Anthropic-compatible API.
           AI_BACKEND: claude
