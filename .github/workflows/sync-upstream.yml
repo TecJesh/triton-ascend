@@ -15,7 +15,6 @@
 # on the self-hosted NPU runner inside the ascend CI container (same image as
 # integration-tests-ascend.yml).
 #
-# Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #   ANTHROPIC_API_KEY  — DeepSeek API key (used via Anthropic-compatible API)
 #   SYNC_PAT           — PAT with `repo` + `workflow` scope, used to push the
 #                        work branch and open the PR (falls back to GITHUB_TOKEN)
