@@ -196,6 +196,10 @@ if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
   message(STATUS "[TA]Building AscendNPU IR with LLVM 22 or later")
   add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
   add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
+  # LLVM 22 deprecates OpBuilder::create<T>() in favor of T::create().
+  # Suppress deprecation warnings that -Werror would treat as errors
+  # across all Ascend backend code (AscendNPU-IR, TritonToLinalg, etc.).
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
 endif()
 
 # -----
