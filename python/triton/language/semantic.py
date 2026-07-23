@@ -121,6 +121,8 @@ class TritonSemantic(Generic[TensorTy]):
         if isinstance(x, self.tensor):
             return x
         x = x.value if isinstance(x, tl.constexpr) else x
+        if isinstance(x, self.tensor):
+            return x
         if isinstance(x, (int, float, bool)):
             dtype = self.to_tensor_type(x)
             return self.scalar_constant(x, dtype=dtype)
