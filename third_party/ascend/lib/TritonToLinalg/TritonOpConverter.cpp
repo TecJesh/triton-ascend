@@ -1811,10 +1811,11 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
         /*init=*/output,
         /*bodyBuilder=*/
         [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-          auto elemOp = builder.create<func::CallOp>(loc,
-                                                     /*name=*/op.getSymbol(),
-                                                     /*resultType=*/dstElemTy,
-                                                     /*operands=*/regionArgs);
+          auto elemOp =
+              builder.create<func::CallOp>(loc,
+                                           /*name=*/op.getSymbol(),
+                                           /*resultType=*/dstElemTy,
+                                           /*operands=*/regionArgs.drop_back());
           builder.create<linalg::YieldOp>(loc, elemOp->getResults());
         });
     if (isDstScalar) {

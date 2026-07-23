@@ -150,6 +150,15 @@ OpFoldResult BlockData::inferBlockOffset(const Location &loc,
   for (auto ofr : offsets) {
     retOffset = addOpFoldResult(retOffset, ofr, loc, builder);
   }
+
+  if (auto constVal = getConstantIntValue(retOffset)) {
+    if (constVal.value() < 0) {
+      Value negVal =
+          builder.create<arith::ConstantIndexOp>(loc, constVal.value());
+      Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
+      retOffset = builder.create<arith::MaxSIOp>(loc, negVal, zero).getResult();
+    }
+  }
   return retOffset;
 }
 
