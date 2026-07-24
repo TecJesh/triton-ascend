@@ -8,19 +8,9 @@ import functools as _functools
 import importlib.util as _importlib_util
 import os as _os
 
-from sphinx.locale import _
 from sphinx.util import logging as _sphinx_logging
 
 _logger = _sphinx_logging.getLogger(__name__)
-
-
-def _tr(text):
-    """Translate *text* using Sphinx locale."""
-    translated = _(text)
-    # Sphinx's _() returns a lazy proxy; str() resolves against the active locale.
-    resolved = str(translated)
-    return resolved if resolved != text else text
-
 
 _path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_ascend_constraints.py")
 _spec = _importlib_util.spec_from_file_location("_ascend_constraints", _path)
@@ -31,6 +21,40 @@ _spec.loader.exec_module(_mod)
 ASCEND_CONSTRAINTS = _mod.CONSTRAINTS
 
 _EXAMPLES_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_examples")
+
+# ---------------------------------------------------------------------------
+# i18n: rubric heading translations keyed by Sphinx ``language`` config value.
+# When the language is not in this table, English is used as the default.
+# ---------------------------------------------------------------------------
+_RUBRIC_I18N = {
+    "zh": {
+        "Example": "示例",
+        "Notes": "说明",
+        "Special Restrictions": "特别限制",
+    },
+}
+
+
+def _translate_rubric(rubric_text: str, lang: str) -> str:
+    """Return the localized rubric heading text for *rubric_text* (English).
+
+    If *lang* is unknown or doesn't have a translation for *rubric_text*,
+    the original English text is returned unchanged.
+    """
+    return _RUBRIC_I18N.get(lang, {}).get(rubric_text, rubric_text)
+
+
+def _localize_rubrics_in_lines(lines, lang: str) -> None:
+    """Replace ``.. rubric:: <English>`` markers in *lines* with the
+    localized equivalents, in-place."""
+    if lang not in _RUBRIC_I18N:
+        return
+    translations = _RUBRIC_I18N[lang]
+    for i, line in enumerate(lines):
+        if line.startswith(".. rubric:: "):
+            en = line[len(".. rubric:: "):].strip()
+            if en in translations:
+                lines[i] = f".. rubric:: {translations[en]}"
 
 
 @_functools.lru_cache(maxsize=None)
@@ -44,7 +68,7 @@ def _read_example(name):
     return ""
 
 
-def _build_note(data):
+def _build_note(data, lang: str = "en"):
     """Build RST content from a constraint dict (constraints + example)."""
     lines = []
 
@@ -53,7 +77,11 @@ def _build_note(data):
 
     example = _read_example(example_file) if example_file else ""
     if example:
-        lines.append(f".. rubric:: {_tr('Example')}")
+        example_label = _translate_rubric("Example", lang)
+        # Ensure a blank line separates the rubric from preceding content
+        # (e.g. when replace_docstring is active and its last line isn't blank).
+        lines.append("")
+        lines.append(f".. rubric:: {example_label}")
         lines.append("")
         lines.append(".. code-block:: python")
         lines.append("")
@@ -62,7 +90,8 @@ def _build_note(data):
         lines.append("")
 
     if constraints:
-        lines.append(".. rubric:: Special Restrictions")
+        restrictions_label = _translate_rubric("Special Restrictions", lang)
+        lines.append(f".. rubric:: {restrictions_label}")
         lines.append("")
         for c in constraints:
             lines.append(f"* {c}")
@@ -78,7 +107,24 @@ def autodoc_process_docstring(app, what, name, obj, options, lines):
     data = ASCEND_CONSTRAINTS.get(name)
     if data is None:
         return
-    note_lines = _build_note(data)
+
+    # Determine the Sphinx language (e.g. "zh", "en") for rubric localisation.
+    try:
+        lang = app.config.language or "en"
+    except AttributeError:
+        lang = "en"
+
+    # If replace_docstring is present, clear the original docstring first
+    # and use the Ascend-specific replacement, so GPU-related content from
+    # the upstream source docstrings never appears in the rendered docs.
+    replace_docstring = data.get("replace_docstring")
+    if replace_docstring:
+        localized = list(replace_docstring)
+        _localize_rubrics_in_lines(localized, lang)
+        lines.clear()
+        lines.extend(localized)
+
+    note_lines = _build_note(data, lang)
     lines.extend(note_lines)
 
 
