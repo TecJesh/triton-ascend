@@ -318,7 +318,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   add_compile_definitions(TRITON_BACKENDS_TUPLE=${TRITON_BACKENDS_TUPLE})
   add_library(triton SHARED ${PYTHON_SRC_PATH}/main.cc
                   ${PYTHON_SRC_PATH}/ir.cc
-                  ${PYTHON_SRC_PATH}/../triton/extension/buffer/src/buffer_ir.cc
+                  ${PROJECT_SOURCE_DIR}/third_party/ascend/language/extension/buffer/src/buffer_ir.cc
                   ${PYTHON_SRC_PATH}/gluon_ir.cc
                   ${PYTHON_SRC_PATH}/linear_layout.cc
                   ${PYTHON_SRC_PATH}/passes.cc
@@ -336,7 +336,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     target_link_libraries(triton PRIVATE z)
   endif()
   target_link_options(triton PRIVATE ${LLVM_LDFLAGS})
-  add_library(entryC SHARED ${PROJECT_SOURCE_DIR}/lib/runtime/libentry/libentry.cpp)
+  add_library(entryC SHARED ${PROJECT_SOURCE_DIR}/third_party/ascend/lib/LibEntry/libentry.cpp)
 
   if (NOT DEFINED LLVM_SYSPATH)
       message(FATAL_ERROR "LLVM_SYSPATH must be set.")

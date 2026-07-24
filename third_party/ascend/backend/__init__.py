@@ -24,12 +24,22 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 
 from .testing import do_bench_npu
 
+from ._backcompat_imports import install as _install_backcompat
+
+_install_backcompat()
+
 
 def _apply_ascend_patch():
-    from triton.compiler.code_generator import CodeGenerator
+    from triton.compiler import compiler as triton_compiler
+    from triton.compiler import code_generator
+    from .code_generator import AscendCodeGenerator, patch_ast_to_ttir
+    from .compiler import patch_compiler_runtime
 
-    if not getattr(CodeGenerator, "_ascend_patch_applied", False):
-        _original_cg_init = CodeGenerator.__init__
+    patch_compiler_runtime(triton_compiler)
+    patch_ast_to_ttir(code_generator)
+
+    if not getattr(AscendCodeGenerator, "_ascend_patch_applied", False):
+        _original_cg_init = AscendCodeGenerator.__init__
 
         def _patched_cg_init(self, *args, **kwargs):
             """
@@ -48,8 +58,8 @@ def _apply_ascend_patch():
                 except Exception as e:
                     logging.warning(f"[Ascend Patch] Failed to set hacc.target: {e}")
 
-        CodeGenerator.__init__ = _patched_cg_init
-        CodeGenerator._ascend_patch_applied = True
+        AscendCodeGenerator.__init__ = _patched_cg_init
+        AscendCodeGenerator._ascend_patch_applied = True
 
     # Patch compiler.parse to support Ascend-specific IR extensions
     # for ir_override and TRITON_KERNEL_OVERRIDE features.

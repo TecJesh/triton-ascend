@@ -18,38 +18,38 @@ CONSTRAINTS = {
         ],
         "example": "triton.autotune",
     },
-    "triton.extension.buffer.language.alloc": {
+    "triton.language.extra.extension.buffer.language.alloc": {
         "constraints": [
             "DataType: Ascend supports int8, int16, int32, uint8, uint64, int64, fp32, bf16, bool. Does not support uint16, uint32, fp16.",
             "Shape: Each element must be a positive integer.",
             "Address space: must fit within the specified address space size limits.",
         ],
         "example":
-        "triton.extension.buffer.language.alloc",
+        "triton.language.extra.extension.buffer.language.alloc",
     },
-    "triton.extension.buffer.language.fixpipe": {
+    "triton.language.extra.extension.buffer.language.fixpipe": {
         "constraints": [
             "DataType: Operates on L0C to UB data movement (Ascend 950/Ascend hardware specific).",
             "Source must be the result of a dot (matrix multiply) operation.",
             "Destination must be a buffer with UB memory scope.",
         ],
         "example":
-        "triton.extension.buffer.language.fixpipe",
+        "triton.language.extra.extension.buffer.language.fixpipe",
     },
-    "triton.extension.buffer.language.to_buffer": {
+    "triton.language.extra.extension.buffer.language.to_buffer": {
         "constraints": [
             "Address space must be one of UB, L1, L0A, L0B, L0C.",
             "When using bind_buffer, tensor and bind_buffer must have identical shapes and element types.",
             "A tensor cannot be bound to multiple buffers.",
         ],
         "example":
-        "triton.extension.buffer.language.to_buffer",
+        "triton.language.extra.extension.buffer.language.to_buffer",
     },
-    "triton.extension.buffer.language.to_tensor": {
+    "triton.language.extra.extension.buffer.language.to_tensor": {
         "constraints": [
             "Same type support constraints as alloc.",
         ],
-        "example": "triton.extension.buffer.language.to_tensor",
+        "example": "triton.language.extra.extension.buffer.language.to_tensor",
     },
     "triton.language.permute": {
         "constraints": [
