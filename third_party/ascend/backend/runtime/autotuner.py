@@ -525,6 +525,49 @@ class AutoTilingTuner(Autotuner):
 
         return axis_arg_names
 
+    def _bench(self, *args, config, **meta):
+        from triton.compiler.errors import CompileTimeAssertionFailure
+        from triton.backends.ascend.errors import MLIRCompilationError
+
+        verbose = knobs.autotuning.print
+        if verbose:
+            print(f"Autotuning kernel {self.base_fn.__name__} with config {config}")
+
+        # check for conflicts, i.e. meta-parameters both provided
+        # as kwargs and by the autotuner
+        conflicts = meta.keys() & config.kwargs.keys()
+        if conflicts:
+            raise ValueError(f"Conflicting meta-parameters: {', '.join(conflicts)}."
+                             " Make sure that you don't re-define auto-tuned symbols.")
+        # augment meta-parameters with tunable ones
+        current = dict(meta, **config.all_kwargs())
+        full_nargs = {**self.nargs, **current}
+
+        def kernel_call():
+            if config.pre_hook:
+                config.pre_hook(full_nargs)
+            self.pre_hook(full_nargs)
+            try:
+                self.fn.run(
+                    *args,
+                    **current,
+                )
+            except Exception as e:
+                try:
+                    self.post_hook(full_nargs, exception=e)
+                finally:
+                    # Throw exception raised by `self.fn.run`
+                    raise
+
+            self.post_hook(full_nargs, exception=None)
+
+        try:
+            return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+        except (OutOfResources, CompileTimeAssertionFailure, MLIRCompilationError) as e:
+            if verbose:
+                print(f"Autotuning failed with {e}")
+            return [float("inf"), float("inf"), float("inf")]
+
     def _promote_axis_arg_name_to_reduction(self, axis):
         axis = self._get_axis_base_name(axis)
         if not isinstance(axis, str) or not axis:
@@ -2092,7 +2135,8 @@ class AutoTilingTuner(Autotuner):
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
 
     def _batch_bench(self, *args, configs, **kwargs):
-        from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+        from triton.compiler.errors import CompileTimeAssertionFailure
+        from triton.backends.ascend.errors import MLIRCompilationError
         from triton.runtime.errors import OutOfResources
 
         kernels_call = {config: self._make_kernel_call(*args, config=config, **kwargs) for config in configs}

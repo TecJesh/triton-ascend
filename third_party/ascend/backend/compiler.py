@@ -33,7 +33,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
 
-from triton._C.libtriton import ir, passes, ascend
+from triton._C.libtriton import ir, passes, ascend, buffer_ir
+from triton._C.libtriton.ascend import ir as ascend_ir
+
 from triton.backends.ascend.utils import (
     _check_bishengir_api_change,
     _check_bishengir_able_save_ir,
@@ -1101,6 +1103,9 @@ class NPUOptions:
     superblock_factor: int = 0
 
     def __post_init__(self):
+        from triton.backends.ascend import _apply_ascend_patch
+
+        _apply_ascend_patch()
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
@@ -1246,12 +1251,12 @@ class AscendBackend(BaseBackend):
     def get_codegen_implementation(self, options):
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        from triton.backends.ascend import _apply_ascend_patch
-        _apply_ascend_patch()
         codegen_fns = {"min_dot_size": min_dot_size(self.target)}
         return codegen_fns
 
     def load_dialects(self, ctx):
+        buffer_ir.load_dialects(ctx)
+        ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):
@@ -1277,6 +1282,35 @@ class AscendBackend(BaseBackend):
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
 
+        # Wrap every stage with Ascend-specific error messages so the
+        # upstream compile() loop raises MLIRCompilationError with
+        # stage names instead of raw exceptions.
+        from triton.backends.ascend.errors import MLIRCompilationError
+
+        _STAGE_NAMES = {
+            "ttadapter": "ConvertTritonIRToLinalgIR",
+            "npubin": "ConvertLinalgIRToBinary",
+            "bcmlir": "BytecodeToLinalgIRByBishengirOpt",
+            "mlirbc": "LinalgIRToBytecodeByTritonMLIROpt",
+        }
+
+        def _wrap(ext, fn):
+
+            def _wrapped(src, metadata):
+                try:
+                    return fn(src, metadata)
+                except MLIRCompilationError:
+                    raise
+                except Exception as e:
+                    error_detail = e.stderr.decode('utf-8') if hasattr(e, 'stderr') and e.stderr and isinstance(
+                        e.stderr, bytes) else str(e)
+                    raise MLIRCompilationError(_STAGE_NAMES.get(ext, "MLIRCompile"), error_detail) from e
+
+            return _wrapped
+
+        for ext in list(stages.keys()):
+            stages[ext] = _wrap(ext, stages[ext])
+
     @functools.lru_cache()
     def hash(self):
         # TODO fetch compiler version
@@ -1285,3 +1319,8 @@ class AscendBackend(BaseBackend):
 
     def get_module_map(self) -> Dict[str, ModuleType]:
         return {}
+
+
+def patch_compiler_runtime(compiler_module):
+    from ._patch_compiler import apply as _apply_ck_patches
+    _apply_ck_patches(compiler_module)

@@ -22,7 +22,6 @@ import os
 import pytest
 import triton
 import torch
-from triton.compiler.errors import MLIRCompilationError
 import triton.language as tl
 import triton.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
@@ -31,7 +30,7 @@ from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
 from triton._C.libtriton import ir, buffer_ir
 from triton._C.libtriton.ascend import ir as ascend_ir
-from triton.compiler.errors import MLIRCompilationError
+from triton.backends.ascend.errors import MLIRCompilationError
 
 os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 
