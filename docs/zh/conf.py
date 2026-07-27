@@ -18,6 +18,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 import os
+import sys as _sys
+import types
+import importlib.util as _ilu
+
+_HERE = os.path.dirname(__file__)
+_REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
+
+
+def _load_module(module_name, file_path):
+    spec = _ilu.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {module_name!r} from {file_path!r}")
+    module = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # General information about the project.
 
 project = 'Triton Ascend'
@@ -45,6 +62,59 @@ extensions = [
 
 autosummary_generate = True
 
+_sys.path.insert(0, os.path.join(_REPO, "python"))
+_force_mock = (os.environ.get("TRITON_DOCS_FORCE_MOCK", "").lower() in ("1", "true", "yes")
+               or os.environ.get("READTHEDOCS") == "True")
+if not _force_mock:
+    try:
+        import triton  # noqa: F401,E402
+    except Exception as _exc:
+        print(f"import triton failed ({_exc!r}); building docs with mock stubs")
+        _force_mock = True
+
+if _force_mock:
+    _load_module(
+        "docs.zh._mock._triton_mock",
+        os.path.join(_HERE, "_mock", "_triton_mock.py"),
+    ).install()
+
+import triton  # noqa: E402
+
+if _force_mock and "triton.language" in _sys.modules:
+    _mock_lang = _sys.modules["triton.language"]
+    if not getattr(_mock_lang, "__file__", None):
+        for _name in list(_sys.modules):
+            if _name == "triton.language" or _name.startswith("triton.language."):
+                del _sys.modules[_name]
+        import triton.language  # noqa: F401, E402
+        import triton.language.extra as _tl_extra  # noqa: E402
+    else:
+        import triton.language.extra as _tl_extra  # noqa: E402
+else:
+    import triton.language.extra as _tl_extra  # noqa: E402
+
+_cann_lang_path = os.path.join(_REPO, "third_party", "ascend", "language")
+if _cann_lang_path not in _tl_extra.__path__:
+    _tl_extra.__path__.append(_cann_lang_path)
+
+if _force_mock:
+    for _name, _path in [
+        ("triton.language.extra.cann", _cann_lang_path),
+        ("triton.language.extra.cann.extension", os.path.join(_cann_lang_path, "cann", "extension")),
+        ("triton.language.extra.cann.libdevice", os.path.join(_cann_lang_path, "cann", "libdevice")),
+        ("triton.language.extra.extension.buffer.language", os.path.join(_cann_lang_path, "extension", "buffer", "language")),
+    ]:
+        _stub = _sys.modules.get(_name)
+        if _stub is None or not getattr(_stub, "__file__", None):
+            _stub = types.ModuleType(_name)
+            _stub.__package__ = _name
+            _stub.__path__ = [_path]
+            _sys.modules[_name] = _stub
+        _parent_name, _, _child = _name.rpartition(".")
+        _parent = _sys.modules.get(_parent_name)
+        if _parent is not None:
+            setattr(_parent, _child, _stub)
+
 # -- I18n: detect language and root doc ---------------------------------------
 _readthedocs_lang = os.environ.get('READTHEDOCS_LANGUAGE')
 _is_build_by_readthedocs = _readthedocs_lang is not None
@@ -66,11 +136,6 @@ else:
 # -- General configuration ---------------------------------------------------
 templates_path = ['_templates']
 
-extensions = [
-    "myst_parser",
-]
-
-
 source_suffix = {
     '.rst': 'restructuredtext',
     '.md': 'markdown',
@@ -79,23 +144,29 @@ source_suffix = {
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'furo'
+html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
-pygments_style = "friendly"
+pygments_style = "sphinx"
 html_last_updated_fmt = "%b %d, %Y"
 
 def setup(app):
-    """Register Pygments lexer aliases."""
+    """Register Pygments lexer aliases and Ascend notes extension."""
     from sphinx.highlighting import lexers
     from pygments.lexers import get_lexer_by_name
-    import shutil
+
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
- 
+
     app.add_css_file('custom.css')
     if not _is_build_by_readthedocs:
         app.add_js_file('lang-switcher.js')
         app.add_css_file('lang-switcher.css')
+
+    _load_module(
+        "docs.zh.python_api._inject_ascend_notes",
+        os.path.join(_HERE, "python-api", "_inject_ascend_notes.py"),
+    ).setup(app)
+
     return {'version': '0.1', 'parallel_read_safe': True}
 
 readthedocs_version = os.environ.get('READTHEDOCS_VERSION', 'latest')
