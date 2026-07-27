@@ -60,8 +60,9 @@ Triton Ascend
     :maxdepth: 3
     :caption: Triton API 接口说明
 
-    triton_api/index.md
-    triton_api/triton/index.md
+    python-api/triton.rst
+    python-api/triton.language.rst
+    python-api/triton.testing.rst
 
 .. toctree::
     :maxdepth: 1
@@ -73,7 +74,9 @@ Triton Ascend
     :maxdepth: 2
     :caption: 昇腾扩展 API 接口说明
 
-    triton_api_extension/index.md
+    python-api/triton.language.extra.cann.extension.rst
+    python-api/triton.language.extra.cann.libdevice.rst
+    python-api/triton.language.extra.extension.buffer.language.rst
 
 .. toctree::
     :maxdepth: 1
