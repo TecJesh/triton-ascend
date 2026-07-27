@@ -142,8 +142,7 @@ tensor::ExtractSliceOp MaskState::getExtractSlice(Value source,
   auto sourceRType = cast<RankedTensorType>(source.getType());
   SmallVector<OpFoldResult> strides(getRank(), builder.getIndexAttr(1));
 
-  auto dstRType = tensor::ExtractSliceOp::inferResultType(sourceRType, offsets,
-                                                          dims, strides);
+  auto dstRType = tensor::ExtractSliceOp::inferResultType(sourceRType, dims);
   return builder.create<tensor::ExtractSliceOp>(loc, dstRType, source, offsets,
                                                 dims, strides);
 }
@@ -154,8 +153,7 @@ tensor::ExtractSliceOp MaskState::getExtractSlice(
   auto sourceRType = cast<RankedTensorType>(source.getType());
   SmallVector<OpFoldResult> strides(getRank(), builder.getIndexAttr(1));
 
-  auto dstRType = tensor::ExtractSliceOp::inferResultType(sourceRType, offsets,
-                                                          dims, strides);
+  auto dstRType = tensor::ExtractSliceOp::inferResultType(sourceRType, dims);
   return builder.create<tensor::ExtractSliceOp>(loc, dstRType, source, offsets,
                                                 dims, strides);
 }
