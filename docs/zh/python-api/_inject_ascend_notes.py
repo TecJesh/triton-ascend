@@ -8,9 +8,19 @@ import functools as _functools
 import importlib.util as _importlib_util
 import os as _os
 
+from sphinx.locale import _
 from sphinx.util import logging as _sphinx_logging
 
 _logger = _sphinx_logging.getLogger(__name__)
+
+
+def _tr(text):
+    """Translate *text* using Sphinx locale."""
+    translated = _(text)
+    # Sphinx's _() returns a lazy proxy; str() resolves against the active locale.
+    resolved = str(translated)
+    return resolved if resolved != text else text
+
 
 _path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_ascend_constraints.py")
 _spec = _importlib_util.spec_from_file_location("_ascend_constraints", _path)
@@ -43,7 +53,7 @@ def _build_note(data):
 
     example = _read_example(example_file) if example_file else ""
     if example:
-        lines.append(".. rubric:: Example")
+        lines.append(f".. rubric:: {_tr('Example')}")
         lines.append("")
         lines.append(".. code-block:: python")
         lines.append("")
