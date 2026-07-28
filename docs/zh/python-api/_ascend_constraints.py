@@ -1235,9 +1235,11 @@ CONSTRAINTS = {
         "example": "triton.language.extra.cann.libdevice.asinh",
     },
     "triton.language.extra.cann.libdevice.atan": {
+            "replace_docstring": ["Computes the element-wise arctangent (inverse tangent) of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.atan",
     },
     "triton.language.extra.cann.libdevice.atan2": {
+            "replace_docstring": ["Computes the arctangent of arg0/arg1, using signs to determine the quadrant."],
         "example": "triton.language.extra.cann.libdevice.atan2",
     },
     "triton.language.extra.cann.libdevice.atanh": {
@@ -1253,51 +1255,64 @@ CONSTRAINTS = {
         "example": "triton.language.extra.cann.libdevice.cyl_bessel_i0",
     },
     "triton.language.extra.cann.libdevice.div_rz": {
+            "replace_docstring": ["Computes the division with round-toward-zero mode."],
         "example": "triton.language.extra.cann.libdevice.div_rz",
     },
     "triton.language.extra.cann.libdevice.erfinv": {
+            "replace_docstring": ["Computes the inverse error function."],
         "example": "triton.language.extra.cann.libdevice.erfinv",
     },
     "triton.language.extra.cann.libdevice.expm1": {
         "example": "triton.language.extra.cann.libdevice.expm1",
     },
     "triton.language.extra.cann.libdevice.fast_dividef": {
+            "replace_docstring": ["Computes a fast floating-point division."],
         "example": "triton.language.extra.cann.libdevice.fast_dividef",
     },
     "triton.language.extra.cann.libdevice.fast_expf": {
+            "replace_docstring": ["Computes a fast exponential (e^x) of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.fast_expf",
     },
     "triton.language.extra.cann.libdevice.float_as_int": {
+            "replace_docstring": ["Reinterprets the bits of a float32 value as an int32."],
         "example": "triton.language.extra.cann.libdevice.float_as_int",
     },
     "triton.language.extra.cann.libdevice.fmod": {
+            "replace_docstring": ["Computes the floating-point remainder of arg0 / arg1."],
         "example": "triton.language.extra.cann.libdevice.fmod",
     },
     "triton.language.extra.cann.libdevice.gamma": {
+            "replace_docstring": ["Computes the Gamma function using the Lanczos approximation."],
         "example": "triton.language.extra.cann.libdevice.gamma",
     },
     "triton.language.extra.cann.libdevice.hypot": {
         "example": "triton.language.extra.cann.libdevice.hypot",
     },
     "triton.language.extra.cann.libdevice.ilogb": {
+            "replace_docstring": ["Returns the integer binary exponent of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.ilogb",
     },
     "triton.language.extra.cann.libdevice.isinf": {
+            "replace_docstring": ["Tests whether each element of the input tensor is infinity."],
         "example": "triton.language.extra.cann.libdevice.isinf",
     },
     "triton.language.extra.cann.libdevice.isnan": {
+            "replace_docstring": ["Tests whether each element of the input tensor is NaN."],
         "example": "triton.language.extra.cann.libdevice.isnan",
     },
     "triton.language.extra.cann.libdevice.ldexp": {
+            "replace_docstring": ["Computes x * 2^exp from a mantissa and an exponent."],
         "example": "triton.language.extra.cann.libdevice.ldexp",
     },
     "triton.language.extra.cann.libdevice.lgamma": {
+            "replace_docstring": ["Computes the natural logarithm of the absolute value of the Gamma function."],
         "example": "triton.language.extra.cann.libdevice.lgamma",
     },
     "triton.language.extra.cann.libdevice.log10": {
         "example": "triton.language.extra.cann.libdevice.log10",
     },
     "triton.language.extra.cann.libdevice.log1p": {
+            "replace_docstring": ["Computes the element-wise natural logarithm of (1 + x)."],
         "example": "triton.language.extra.cann.libdevice.log1p",
     },
     "triton.language.extra.cann.libdevice.nearbyint": {
@@ -1307,30 +1322,38 @@ CONSTRAINTS = {
         "example": "triton.language.extra.cann.libdevice.nextafter",
     },
     "triton.language.extra.cann.libdevice.pow": {
+            "replace_docstring": ["Computes arg0 raised to the power of arg1."],
         "example": "triton.language.extra.cann.libdevice.pow",
     },
     "triton.language.extra.cann.libdevice.reciprocal": {
+            "replace_docstring": ["Computes the element-wise reciprocal (1/x) of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.reciprocal",
     },
     "triton.language.extra.cann.libdevice.relu": {
+            "replace_docstring": ["Computes the element-wise ReLU activation: max(0, x)."],
         "example": "triton.language.extra.cann.libdevice.relu",
     },
     "triton.language.extra.cann.libdevice.rint": {
+            "replace_docstring": ["Rounds the input tensor to the nearest integer using round-to-nearest-even."],
         "example": "triton.language.extra.cann.libdevice.rint",
     },
     "triton.language.extra.cann.libdevice.round": {
+            "replace_docstring": ["Rounds the input tensor to the nearest integer."],
         "example": "triton.language.extra.cann.libdevice.round",
     },
     "triton.language.extra.cann.libdevice.signbit": {
+            "replace_docstring": ["Returns the sign bit of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.signbit",
     },
     "triton.language.extra.cann.libdevice.sinh": {
         "example": "triton.language.extra.cann.libdevice.sinh",
     },
     "triton.language.extra.cann.libdevice.tan": {
+            "replace_docstring": ["Computes the element-wise tangent of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.tan",
     },
     "triton.language.extra.cann.libdevice.tanh": {
+            "replace_docstring": ["Computes the element-wise hyperbolic tangent of the input tensor."],
         "example": "triton.language.extra.cann.libdevice.tanh",
     },
     "triton.language.extra.cann.libdevice.trunc": {
