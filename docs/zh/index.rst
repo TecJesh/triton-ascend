@@ -64,8 +64,6 @@ Triton API 接口说明
 
 - :doc:`Triton-Ascend FAQ <FAQ>`
 
-.. toctree 驱动侧栏导航。
-
 .. toctree::
    :hidden:
    :titlesonly:
