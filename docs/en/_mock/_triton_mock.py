@@ -186,14 +186,14 @@ def install() -> None:
     ]:
         _make_module(_name)
 
-    _make_module("triton.extension")
-    _make_module("triton.extension.buffer")
-
     # ------------------------------------------------------------------ #
     # triton.extension.buffer.language — populated from real source       #
     # via AST parsing so docstrings / signatures stay in sync without     #
     # requiring a working ``import triton`` (no NPU needed).              #
     # ------------------------------------------------------------------ #
+    _make_module("triton.extension")
+    _make_module("triton.extension.buffer")
+
     _repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
     _parse_source_path = os.path.join(_repo_root, "docs", "zh", "python-api", "_parse_source.py")
     _parse_spec = _ilu.spec_from_file_location("_parse_source", _parse_source_path)
