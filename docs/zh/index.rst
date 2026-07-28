@@ -43,13 +43,16 @@ Triton-Ascend算子调试与调优
 Triton API 接口说明
 ~~~~~~~~~~~~~~~~~~~
 
-- :doc:`triton.language API <triton_api/index>`
-- :doc:`triton <triton_api/triton/index>`
+- :doc:`triton <python-api/triton>`
+- :doc:`triton.language <python-api/triton.language>`
+- :doc:`triton.testing <python-api/triton.testing>`
 
-Libdevice 开发者手册
-~~~~~~~~~~~~~~~~~~~~
+昇腾扩展 API 接口说明
+~~~~~~~~~~~~~~~~~~~~~
 
-- :doc:`Libdevice 开发者手册 <libdevice/libdevice_developer_guide>`
+- :doc:`triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>`
+- :doc:`triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>`
+- :doc:`triton.extension.buffer.language <python-api/triton.extension.buffer.language>`
 
 环境变量
 ~~~~~~~~
@@ -113,15 +116,18 @@ Libdevice 开发者手册
    :titlesonly:
    :caption: Triton API 接口说明
 
-   triton.language API <triton_api/index>
-   triton <triton_api/triton/index>
+   triton <python-api/triton>
+   triton.language <python-api/triton.language>
+   triton.testing <python-api/triton.testing>
 
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: Libdevice 开发者手册
+   :caption: 昇腾扩展 API 接口说明
 
-   Libdevice 开发者手册 <libdevice/libdevice_developer_guide>
+   triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
+   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
+   triton.extension.buffer.language <python-api/triton.extension.buffer.language>
 
 .. toctree::
    :hidden:
