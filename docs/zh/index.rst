@@ -43,7 +43,6 @@ Triton Ascend
 - :doc:`triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>`
 - :doc:`triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>`
 - :doc:`triton.extension.buffer.language <python-api/triton.extension.buffer.language>`
-- :doc:`libdevice开发者手册 <libdevice/libdevice_developer_guide>`
 
 **特性说明**
 
@@ -63,8 +62,6 @@ Triton Ascend
 - :doc:`Contributors <community/CONTRIBUTOR>`
 - :doc:`安全声明 <community/SECURITYNOTE_zh>`
 
-
-.. toctree 驱动侧栏导航。
 
 .. toctree::
    :hidden:
@@ -107,7 +104,6 @@ Triton Ascend
    triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
    triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
    triton.extension.buffer.language <python-api/triton.extension.buffer.language>
-   libdevice开发者手册 <libdevice/libdevice_developer_guide>
 
 .. toctree::
    :hidden:
