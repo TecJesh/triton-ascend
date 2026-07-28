@@ -330,9 +330,9 @@ diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp b/mli
 index e0cf353da207..6bd0b89e5517 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
 +++ b/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
-@@ -654,7 +654,9 @@ bool AnalysisState::canOmitTensorCopy(OpOperand &opOperand) const {
+@@ -655,11 +655,13 @@ bool AnalysisState::canOmitTensorCopy(OpOperand &opOperand) const {
  }
- 
+
  bool AnalysisState::isInPlace(OpOperand &opOperand) const {
 -  // ToBufferOps are always in-place.
 +  // ToMemrefOps and ToBufferOps are always in-place.
@@ -340,39 +340,11 @@ index e0cf353da207..6bd0b89e5517 100644
 +    return true;
    if (isa<ToBufferOp>(opOperand.getOwner()))
      return true;
- 
-@@ -690,6 +692,16 @@ static void ensureToBufferOpIsValid(Value tensor, Type memrefType) {
- #endif
+
+   // In the absence of analysis information, OpOperands that bufferize to a
+   // memory write are out-of-place, i.e., an alloc and copy is inserted.
+   return !bufferizesToMemoryWrite(opOperand);
  }
- 
-+// bufferization.to_memref is not allowed to change the rank.
-+static void ensureToMemrefOpIsValid(Value tensor, Type memrefType) {
-+#ifndef NDEBUG
-+  auto rankedTensorType = llvm::dyn_cast<RankedTensorType>(tensor.getType());
-+  assert((!rankedTensorType || llvm::cast<MemRefType>(memrefType).getRank() ==
-+                                   rankedTensorType.getRank()) &&
-+         "to_memref would be invalid: mismatching ranks");
-+#endif
-+}
-+
- FailureOr<Value> bufferization::getBuffer(RewriterBase &rewriter, Value value,
-                                           const BufferizationOptions &options,
-                                           const BufferizationState &state) {
-@@ -702,12 +714,13 @@ FailureOr<Value> bufferization::getBuffer(RewriterBase &rewriter, Value value,
-   if (auto toTensorOp = value.getDefiningOp<bufferization::ToTensorOp>())
-     return toTensorOp.getBuffer();
- 
--  // Insert to_buffer op.
-+  // Insert to_memref or to_buffer op.
-   OpBuilder::InsertionGuard g(rewriter);
-   setInsertionPointAfter(rewriter, value);
-   FailureOr<BufferLikeType> bufferType = getBufferType(value, options, state);
-   if (failed(bufferType))
-     return failure();
-+  ensureToMemrefOpIsValid(value, *bufferType);
-   ensureToBufferOpIsValid(value, *bufferType);
-   return bufferization::ToBufferOp::create(rewriter, value.getLoc(),
-                                            *bufferType, value)
 diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
 index 56ff2121e462..5d1d7a165c3d 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
@@ -1207,7 +1179,14 @@ index 5d08cccb4faa..219e64280985 100644
  
  void StoreOp::getEffects(
      SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-@@ -4209,6 +4540,234 @@ LogicalResult InlineAsmOp::verify() {
+@@ -4215,16 +4215,244 @@ LogicalResult InlineAsmOp::verify() {
+   if (!getTailCallKindAttr())
+     return success();
+
+   if (getTailCallKindAttr().getTailCallKind() == TailCallKind::MustTail)
+     return emitOpError(
+         "tail call kind 'musttail' is not supported by this operation");
+
    return success();
  }
  
@@ -1440,8 +1419,11 @@ index 5d08cccb4faa..219e64280985 100644
 +}
 +
  //===----------------------------------------------------------------------===//
- // LLVMDialect initialization, type parsing, and registration.
+ // UDivOp
  //===----------------------------------------------------------------------===//
+ Speculation::Speculatability UDivOp::getSpeculatability() {
+   // X / 0 => UB
+   Value divisor = getRhs();
 diff --git a/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp b/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp
 index 59013a23b3e3..b44c025c9c33 100644
 --- a/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp
