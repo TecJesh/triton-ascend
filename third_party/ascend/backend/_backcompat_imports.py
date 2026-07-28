@@ -10,6 +10,7 @@ without modifying existing code.
       -> triton.backends.ascend.runtime.libentry
 """
 
+import os
 import sys
 import types
 from importlib.abc import Loader, MetaPathFinder
@@ -24,6 +25,11 @@ _REDIRECTS = [
 # Synthetic parent packages (deleted from python/triton/extension/).
 _SYNTHETIC = {"triton.extension", "triton.extension.buffer"}
 
+# Packages that were auto-created as lightweight stubs to bypass __init__.py
+# side effects during backcompat redirects. If the real package is later
+# imported directly, the stub is removed so the real __init__.py executes.
+_SYNTH_BYPASS = set()
+
 
 def _make_synth(name):
     if name in sys.modules:
@@ -35,6 +41,28 @@ def _make_synth(name):
     parent, _, child = name.rpartition(".")
     if parent in sys.modules:
         setattr(sys.modules[parent], child, mod)
+
+
+def _ensure_synth_runtime():
+    """Pre-register a lightweight parent package so importing
+    triton.backends.ascend.runtime.libentry does NOT trigger
+    runtime/__init__.py (and its module-level _patch_autotune call).
+
+    Only the minimal attributes needed for submodule resolution
+    (__path__, __package__) are set.  The stub is tracked in
+    _SYNTH_BYPASS so it can be transparently replaced when code
+    later imports the real runtime package.
+    """
+    name = "triton.backends.ascend.runtime"
+    if name in sys.modules:
+        return  # already loaded (real or synthetic)
+    runtime_dir = os.path.join(os.path.dirname(__file__), "runtime")
+    mod = types.ModuleType(name)
+    mod.__package__ = name
+    mod.__path__ = [runtime_dir]
+    mod.__file__ = os.path.join(runtime_dir, "__init__.py")
+    sys.modules[name] = mod
+    _SYNTH_BYPASS.add(name)
 
 
 class _Loader(Loader):
@@ -57,9 +85,22 @@ class _Finder(MetaPathFinder):
         if fullname in _SYNTHETIC:
             _make_synth(fullname)
             return ModuleSpec(fullname, None, is_package=True)
+
+        # If code imports the real runtime package directly, remove any
+        # synthetic stub we placed earlier so the real __init__.py runs.
+        if fullname in _SYNTH_BYPASS:
+            del sys.modules[fullname]
+            _SYNTH_BYPASS.discard(fullname)
+            return None  # let Python's default import machinery load __init__.py
+
         pair = self._map.get(fullname)
         if pair is None:
             return None
+
+        # Before redirecting triton.runtime.libentry → triton.backends.ascend.runtime.libentry,
+        # pre-register a synthetic parent package so runtime/__init__.py is skipped.
+        _ensure_synth_runtime()
+
         return ModuleSpec(fullname, _Loader(pair[0]), is_package=pair[1])
 
 
