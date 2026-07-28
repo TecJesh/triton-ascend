@@ -1,1 +1,1 @@
-../../zh/python-api/triton.extension.buffer.language.rst
+../../zh/python-api/triton.language.extra.extension.buffer.language.rst
