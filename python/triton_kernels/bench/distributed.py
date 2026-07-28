@@ -64,6 +64,12 @@ def initialize_matmul(
     )
 
 
+def cleanup_matmul():
+    if not _is_distributed_launch():
+        return
+    symm_mem_pool.release()
+
+
 def setup() -> Tuple[int, int]:
     if _is_distributed_launch():
         world_size = int(os.environ["WORLD_SIZE"])
@@ -248,7 +254,8 @@ def distributed_run(rank, world_size, batch, dim1, dim2, n_expts_tot, n_expts_ac
     opt1 = dict()
     opt2 = dict()
     if w_dtype == "mx4" and not is_hip():
-        num_warps = 4 if batch <= 512 else 8
+        # on hopper we only use 8 warps when weight is scaled
+        num_warps = 4 if batch <= 512 and cuda_capability_geq(10, 0) else 8
         value_layout, value_layout_opts = layout.make_default_matmul_mxfp4_w_layout(mx_axis=1)
         scale_layout, scale_layout_opts = layout.make_default_matmul_mxfp4_w_scale_layout(
             mx_axis=1, num_warps=num_warps)
@@ -335,6 +342,7 @@ def distributed_run(rank, world_size, batch, dim1, dim2, n_expts_tot, n_expts_ac
                                    atol=1.0, equal_nan=True)
 
     dist.barrier()
+    symm_mem_pool.release()
     dist.destroy_process_group()
 
 
@@ -344,17 +352,25 @@ has_native_mx4 = torch.cuda.get_device_capability(0)[0] >= 10 or get_cdna_versio
 @pytest.mark.parametrize(
     "batch, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_dtype, TP, EP",
     # dense cases
-    [(1024, 1024, 1024, 1, 1, "bf16", "bf16", 1, 1), (1024, 1024, 1024, 1, 1, "fp8", "fp8", 1, 1)]
+    [
+        # small batch size
+        (128, 1024, 1024, 1, 1, "bf16", "bf16", 1, 1), (128, 1024, 1024, 1, 1, "fp8", "fp8", 1, 1),
+        # large batch size
+        (1024, 1024, 1024, 1, 1, "bf16", "bf16", 1, 1), (1024, 1024, 1024, 1, 1, "fp8", "fp8", 1, 1)
+    ]
     # moe cases - test parallelism
     + [
+        (128, 1024, 1024, 128, 2, "bf16", "bf16", 1, 1),
         (1024, 1024, 1024, 128, 2, "bf16", "bf16", 1, 1),
         (1024, 1024, 1024, 128, 2, "bf16", "bf16", 1, 4),
     ] +
     # moe cases - test precision
     ([
+        (128, 1024, 1024, 128, 2, "fp8", "mx4", 1, 1),
         (1024, 1024, 1024, 128, 2, "fp8", "mx4", 1, 1),
         (1024, 1024, 1024, 128, 2, "fp8", "mx4", 1, 4),
     ] if has_native_mx4 else [
+        (128, 1024, 1024, 128, 2, "bf16", "mx4", 1, 1),
         (1024, 1024, 1024, 128, 2, "bf16", "mx4", 1, 1),
         (1024, 1024, 1024, 128, 2, "bf16", "mx4", 1, 4),
     ]),
