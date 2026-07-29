@@ -547,7 +547,9 @@ class CMakeBuild(build_ext):
         lit_dir = shutil.which('lit')
         ninja_dir = shutil.which('ninja')
         # lit is used by the test suite
-        thirdparty_cmake_args = get_thirdparty_packages([get_llvm_package_info()])
+        # TA: skip downloading LLVM prebuilt package, use locally built LLVM
+        # thirdparty_cmake_args = get_thirdparty_packages([get_llvm_package_info()])
+        thirdparty_cmake_args = get_thirdparty_packages([])
         thirdparty_cmake_args += self.get_pybind11_cmake_args()
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
         wheeldir = os.path.dirname(extdir)
