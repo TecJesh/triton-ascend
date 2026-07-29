@@ -260,17 +260,18 @@ def get_llvm_package_info():
             f"LLVM pre-compiled image is not available for {system}-{arch}. Proceeding with user-configured LLVM from source build."
         )
         return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
+    # TA: skip downloading LLVM prebuilt package, use locally built LLVM
     # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
     # release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    llvm_hash_path = os.path.join(get_base_dir(), "cmake", "llvm-hash.txt")
-    with open(llvm_hash_path, "r") as llvm_hash_file:
-        rev = llvm_hash_file.read(8)
-    patch_hash = get_llvm_patch_hash()
-    name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
-    # Create a stable symlink that doesn't include revision
-    sym_name = f"llvm-{system_suffix}"
-    url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
-    return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH", sym_name=sym_name)
+    # llvm_hash_path = os.path.join(get_base_dir(), "cmake", "llvm-hash.txt")
+    # with open(llvm_hash_path, "r") as llvm_hash_file:
+    #     rev = llvm_hash_file.read(8)
+    # patch_hash = get_llvm_patch_hash()
+    # name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
+    # sym_name = f"llvm-{system_suffix}"
+    # url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
+    # return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH", sym_name=sym_name)
+    return Package("llvm", "", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
 
 
 def open_url(url):
@@ -325,7 +326,7 @@ def get_thirdparty_packages(packages: list):
 
         if is_offline_build() and not input_defined:
             raise RuntimeError(f"Requested an offline build but {p.syspath_var_name} is not set")
-        if not is_offline_build() and not input_defined and not input_compatible:
+        if not is_offline_build() and not input_defined and not input_compatible and p.url:
             with contextlib.suppress(Exception):
                 shutil.rmtree(package_root_dir)
             os.makedirs(package_root_dir, exist_ok=True)
