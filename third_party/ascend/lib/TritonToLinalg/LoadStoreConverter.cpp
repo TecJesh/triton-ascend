@@ -353,8 +353,11 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     rewriter.setInsertionPoint(op);
     allocOp = rewriter.create<memref::SubViewOp>(
         loc, cast<MemRefType>(allocType), allocOp, offsets, sizes, strides);
-    rewriter.replaceAllUsesExcept(insertSliceOp.getResult(),
-                                  insertSliceOp.getDest(), insertSliceOp);
+    // Bypass the rewriter to avoid issues with the conversion framework's
+    // tracking of conditional replacements (LLVM PR #169606).
+    // replaceUsesWithIf triggers an assertion in rollback mode.
+    insertSliceOp.getResult().replaceAllUsesExcept(insertSliceOp.getDest(),
+                                                   insertSliceOp);
     rewriter.eraseOp(insertSliceOp);
   } else {
     allocOp = rewriter.create<memref::AllocOp>(
