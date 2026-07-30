@@ -1549,7 +1549,7 @@ void SliceEncodingAttr::print(mlir::AsmPrinter &printer) const {
 LogicalResult
 SliceEncodingAttr::verify(function_ref<InFlightDiagnostic()> emitError,
                           unsigned dim, DistributedEncodingTrait parent) {
-  unsigned rank = ::getCGALayout(parent).getRank();
+  unsigned rank = cast<LayoutEncodingTrait>(parent).getRank();
   if (rank <= 1)
     return emitError() << "parent layout must have at least rank >= 2";
   if (dim >= rank) {
@@ -3761,7 +3761,6 @@ void TritonGPUDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "triton/Dialect/TritonGPU/IR/Ops.cpp.inc"
-#include "triton/Dialect/TritonGPU/IR/OpsEnums.cpp.inc"
       >();
   addInterfaces<TritonInlinerInterface>();
   addInterfaces<TritonGPUOpAsmInterface>();
