@@ -30,7 +30,8 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DECL_TRITONTOLINALG
+#define GEN_PASS_DEF_TRITONTOLINALG
 #include "ascend/include/TritonToLinalg/Passes.h.inc"
 
 extern int nd2nzFlag;
@@ -59,7 +60,8 @@ public:
   explicit TritonTypeConverter();
 };
 
-class TritonToLinalgPass : public TritonToLinalgBase<TritonToLinalgPass> {
+class TritonToLinalgPass
+    : public ::impl::TritonToLinalgBase<TritonToLinalgPass> {
 
   static auto constexpr LAUNCH_GRID_RANK = getMaxEnumValForProgramIDDim() + 1;
   static unsigned int constexpr TRITON_PROGRAM_INFO_ARG_COUNT =
