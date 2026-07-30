@@ -7,8 +7,7 @@ include_directories(
 
 add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
 
-# TODO: what's this?
-llvm_update_compile_flags(triton-opt)
+target_compile_options(triton-opt PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-opt PRIVATE
   ${triton_libs}
   # Ascend backend libraries
@@ -45,10 +44,10 @@ target_link_libraries(triton-opt PRIVATE
 
 mlir_check_all_link_libraries(triton-opt)
 
-add_llvm_executable(triton-reduce triton-reduce.cpp PARTIAL_SOURCES_INTENDED)
+add_executable(triton-reduce triton-reduce.cpp)
 mlir_check_all_link_libraries(triton-reduce)
+target_compile_options(triton-reduce PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 
-llvm_update_compile_flags(triton-reduce)
 target_link_libraries(triton-reduce PRIVATE
   ${triton_libs}
   # Ascend backend libraries
@@ -85,9 +84,9 @@ target_link_libraries(triton-reduce PRIVATE
 
 mlir_check_all_link_libraries(triton-reduce)
 
-add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
+add_executable(triton-lsp triton-lsp.cpp)
 
-llvm_update_compile_flags(triton-lsp)
+target_compile_options(triton-lsp PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-lsp PRIVATE
   ${triton_libs}
   # Ascend backend libraries
@@ -125,14 +124,9 @@ target_link_libraries(triton-lsp PRIVATE
 mlir_check_all_link_libraries(triton-lsp)
 
 
-add_llvm_executable(triton-llvm-opt
-  triton-llvm-opt.cpp
-
-  PARTIAL_SOURCES_INTENDED
-  DEPENDS
-  intrinsics_gen
-  SUPPORT_PLUGINS
-  )
+add_executable(triton-llvm-opt triton-llvm-opt.cpp)
+add_dependencies(triton-llvm-opt intrinsics_gen)
+target_compile_options(triton-llvm-opt PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-llvm-opt PRIVATE
   TritonLLVMIR
 
@@ -145,7 +139,8 @@ target_link_libraries(triton-llvm-opt PRIVATE
 export_executable_symbols_for_plugins(triton-llvm-opt)
 
 
-add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
+add_executable(triton-tensor-layout triton-tensor-layout.cpp)
+target_compile_options(triton-tensor-layout PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-tensor-layout PRIVATE
   ${triton_libs}
   # Ascend backend libraries
