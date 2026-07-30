@@ -11,7 +11,9 @@ include "mlir/Pass/PassBase.td"
 def TritonToLLVM : Pass<"triton-to-llvm", "mlir::ModuleOp"> {
   let summary = "Convert Triton to LLVM dialect";
   let constructor = "triton::createTritonToLLVMPass()";
-  let dependentDialects = ["LLVM::LLVMDialect", "tensor::TensorDialect", "arith::ArithDialect"];
+  let dependentDialects = ["LLVM::LLVMDialect", "tensor::TensorDialect",
+                          "arith::ArithDialect", "mlir::gpu::GPUDialect",
+                          "mlir::triton::gpu::TritonGPUDialect"];
 }
 
 #endif // TRITON_TO_LLVM_CONVERSION_PASSES
