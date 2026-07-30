@@ -135,6 +135,7 @@ function(add_triton_library name)
   set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
   add_triton_object(${name} ${ARGN})
   llvm_update_compile_flags(${name})
+  target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 
   # To enable llvm-cov coverage tool, you need to pass the argument TRITON_APPEND_CMAKE_ARGS="-DTRITON_ENABLE_COVERAGE_LLVM_COV=ON" during compilation.
   if(TRITON_ENABLE_COVERAGE_LLVM_COV)
@@ -161,6 +162,7 @@ endfunction()
 
 # Disable warnings that show up in external code (gtest;pybind11)
 if(NOT MSVC)
+  set(TRITON_DISABLE_EH_RTTI_FLAGS "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")

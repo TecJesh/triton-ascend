@@ -101,14 +101,14 @@ bool TargetInfo::supportMaximumMinimum() const {
 }
 
 Value TargetInfo::getClusterCTAId(RewriterBase &rewriter, Location loc) const {
-  if (supportsMultiCTALaunch()) {
-    // We dispatch only along x; return the workgroup id x
-    return LLVM::createLLVMIntrinsicCallOp(rewriter, loc,
-                                           "llvm.amdgcn.cluster.workgroup.id.x",
-                                           {rewriter.getI32Type()}, {})
-        .getResult(0);
-  }
-  return arith::ConstantIntOp::create(rewriter, loc, 0, 32);
+  if (triton::gpu::lookupNumCTAs(&rewriter.getInsertionBlock()->front()) == 1)
+    return arith::ConstantIntOp::create(rewriter, loc, 0, 32);
+
+  // We dispatch only along x; return the workgroup id x
+  return LLVM::createLLVMIntrinsicCallOp(rewriter, loc,
+                                         "llvm.amdgcn.cluster.workgroup.id.x",
+                                         {rewriter.getI32Type()}, {})
+      .getResult(0);
 }
 
 Value TargetInfo::ballot(RewriterBase &rewriter, Location loc, Type type,
@@ -294,14 +294,13 @@ static Value permuteAndReduce(RewriterBase &rewriter, Location loc,
 //   step 4: apply reduction to get the final results
 static bool warpReduceSwap16or32(RewriterBase &rewriter, Location loc,
                                  SmallVector<Value> &acc, triton::ReduceOp op,
-                                 unsigned numLaneToReduce,
-                                 unsigned interleave) {
+                                 unsigned activeLanes) {
   Operation *reduxOp = op.getSingleCombiner();
   if (!reduxOp)
     return false;
 
-  bool mfma32Case = numLaneToReduce == 2 && interleave == 32;
-  bool mfma16Case = numLaneToReduce == 4 && interleave == 16;
+  bool mfma32Case = activeLanes == 32;
+  bool mfma16Case = activeLanes == (16 | 32);
   if (!(mfma32Case || mfma16Case))
     return false;
 
@@ -326,12 +325,12 @@ static bool warpReduceSwap16or32(RewriterBase &rewriter, Location loc,
 
 static bool warpReduceSwap16(RewriterBase &rewriter, Location loc,
                              SmallVector<Value> &acc, triton::ReduceOp op,
-                             unsigned numLaneToReduce, unsigned interleave) {
+                             unsigned activeLanes) {
   Operation *reduxOp = op.getSingleCombiner();
   if (!reduxOp)
     return false;
 
-  bool mfma16Case = numLaneToReduce == 2 && interleave == 16;
+  bool mfma16Case = activeLanes == 16;
   if (!mfma16Case)
     return false;
 
@@ -349,17 +348,16 @@ static bool warpReduceSwap16(RewriterBase &rewriter, Location loc,
 
 bool TargetInfo::warpReduce(RewriterBase &rewriter, Location loc,
                             SmallVector<Value> &acc, triton::ReduceOp op,
-                            unsigned numLaneToReduce,
-                            unsigned interleave) const {
+                            unsigned activeLanes) const {
   auto b = TritonLLVMOpBuilder(loc, rewriter);
 
   if (getISAFamily() == ISAFamily::CDNA4 &&
-      warpReduceSwap16or32(rewriter, loc, acc, op, numLaneToReduce, interleave))
+      warpReduceSwap16or32(rewriter, loc, acc, op, activeLanes))
     return true;
   if ((getISAFamily() == ISAFamily::GFX1250) &&
-      warpReduceSwap16(rewriter, loc, acc, op, numLaneToReduce, interleave))
+      warpReduceSwap16(rewriter, loc, acc, op, activeLanes))
     return true;
-  if (numLaneToReduce != getWarpSize())
+  if (activeLanes != (getWarpSize() - 1))
     return false;
   if (isCDNA(getISAFamily()) && getISAFamily() == ISAFamily::CDNA1)
     return false;
@@ -644,12 +642,7 @@ bool TargetInfo::supportsDirectToLDSScattering() const {
   switch (getISAFamily()) {
   case ISAFamily::GFX1250:
     return true;
-  case ISAFamily::CDNA3:
-  case ISAFamily::CDNA4:
-    return false;
   default:
-    llvm::report_fatal_error(
-        "Unsupported architecture for direct to lds loads");
     return false;
   }
 }
@@ -690,6 +683,13 @@ bool TargetInfo::supportsMultiCTALaunch() const {
 bool TargetInfo::supportsClusterLoadBitWidth(int biwWidth) const {
   if (getISAFamily() == ISAFamily::GFX1250) {
     return llvm::is_contained({32, 64, 128}, biwWidth);
+  }
+  return false;
+}
+
+bool TargetInfo::supportsDirectFromLdsStoreBitWidth(int bitWidth) const {
+  if (getISAFamily() == ISAFamily::GFX1250) {
+    return llvm::is_contained({128, 64, 32, 8}, bitWidth);
   }
   return false;
 }

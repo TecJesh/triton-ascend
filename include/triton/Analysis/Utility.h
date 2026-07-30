@@ -42,13 +42,7 @@ public:
     }
   }
 
-  ArrayRef<int64_t> getSrcShape() { return srcShape; }
-
-  Attribute getSrcLayout() { return srcEncoding; }
-
-  triton::ReduceOp getOperation() { return op; }
-
-  unsigned getThreadOffsetOnReductionAxis();
+  RankedTensorType getSrcTy() { return srcTy; }
 
   bool isWarpSynchronous();
 
@@ -56,16 +50,26 @@ public:
 
   unsigned getIntraWarpSizeWithUniqueData();
 
-  // The shape of the shared memory space needed for the reduction.
-  SmallVector<unsigned> getScratchRepShape();
-
-  SmallVector<unsigned> getOrderWithAxisAtBeginning();
-
-  unsigned getScratchSizeInBytes();
-
   bool isReduceWithinCTA();
 
   bool isAssociative();
+
+  static triton::ColumnAction
+  makeAxisContiguous(const triton::LinearLayout &layout, int axis);
+
+  static triton::LinearLayout
+  zeroBasesAlongDimAndReorder(const triton::LinearLayout &layout, unsigned axis,
+                              mlir::StringAttr dim);
+
+  static triton::LinearLayout getInterLayout(const triton::LinearLayout &layout,
+                                             unsigned axis);
+
+  static triton::LinearLayout reducedRegLaneLayout(RankedTensorType srcTy,
+                                                   unsigned axis);
+
+  SmallVector<unsigned>
+  getScratchBytesForCvt(const triton::LinearLayout &srcLayout,
+                        const triton::LinearLayout &dstLayout);
 
 private:
   triton::ReduceOp op;
@@ -78,33 +82,7 @@ private:
 
 class ScanLoweringHelper {
 public:
-  explicit ScanLoweringHelper(triton::ScanOp op) : scanOp(op) {
-    auto firstTy = cast<RankedTensorType>(op.getOperands()[0].getType());
-    srcShape = firstTy.getShape();
-    legacyEncoding = firstTy.getEncoding();
-    srcEncoding = triton::gpu::toLinearEncoding(firstTy);
-    srcElementTypes = op.getElementTypes();
-    // The codegen does not support different element/thread/warp order so
-    // we choose one a priori. We choose that of the blocked encoding.
-    // When we generalise this code to other layouts we'll probably need to
-    // get rid of all this logic and the *Stride auxiliary methods
-    // and replace them by transposes and reshapes on the LinearLayout
-    if (auto blockedEncoding =
-            dyn_cast<triton::gpu::BlockedEncodingAttr>(legacyEncoding)) {
-      order = llvm::to_vector(blockedEncoding.getOrder());
-    } else {
-      order = srcEncoding.getOrder();
-    }
-
-    for (const auto &t : op.getInputTypes()) {
-      if (t.getShape() != srcShape) {
-        op.emitError() << "shape mismatch";
-      }
-      if (t.getEncoding() != legacyEncoding) {
-        op.emitError() << "encoding mismatch";
-      }
-    }
-  }
+  explicit ScanLoweringHelper(triton::ScanOp op);
   // Return true if the lowering of the scan op is supported.
   bool isSupported();
   // Return the number of elements per thread along axis dim.

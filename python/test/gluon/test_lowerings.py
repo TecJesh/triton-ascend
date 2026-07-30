@@ -37,6 +37,20 @@ def _filter_layouts(layouts):
 THREADS_PER_WARP = triton.runtime.driver.active.get_current_target().warp_size
 
 
+@gluon.jit
+def _combine(a, b):
+    return a + b
+
+
+@gluon.jit
+def scan_kernel(x_ptr, z_ptr, M: ttgl.constexpr, N: ttgl.constexpr, layout: ttgl.constexpr, axis: ttgl.constexpr):
+    x_offs_m = ttgl.arange(0, M, layout=ttgl.SliceLayout(1, layout))[:, None]
+    x_offs_n = ttgl.arange(0, N, layout=ttgl.SliceLayout(0, layout))[None, :]
+    x = ttgl.load(x_ptr + x_offs_m * N + x_offs_n)
+    y = ttgl.associative_scan(x, axis=axis, combine_fn=_combine)
+    ttgl.store(z_ptr + x_offs_m * N + x_offs_n, y)
+
+
 @pytest.mark.parametrize("M, N", [(32, 16), (32, 32), (32, 64), (64, 32)])
 @pytest.mark.parametrize(
     "src_layout",
@@ -57,29 +71,102 @@ THREADS_PER_WARP = triton.runtime.driver.active.get_current_target().warp_size
 @pytest.mark.parametrize("sanitize_overflow", [False, True])
 def test_scan_layouts(M, N, src_layout, axis, sanitize_overflow, device):
 
-    @gluon.jit
-    def _combine(a, b):
-        return a + b
-
-    @gluon.jit
-    def kernel(x_ptr, z_ptr, M: ttgl.constexpr, N: ttgl.constexpr, layout: ttgl.constexpr, axis: ttgl.constexpr):
-        x_offs_m = ttgl.arange(0, M, layout=ttgl.SliceLayout(1, layout))[:, None]
-        x_offs_n = ttgl.arange(0, N, layout=ttgl.SliceLayout(0, layout))[None, :]
-        x = ttgl.load(x_ptr + x_offs_m * N + x_offs_n)
-        y = ttgl.associative_scan(x, axis=axis, combine_fn=_combine)
-        ttgl.store(z_ptr + x_offs_m * N + x_offs_n, y)
-
     torch.manual_seed(0)
 
     x = torch.randint(-100, 100, (M, N), dtype=torch.int32, device=device)
     z = torch.zeros((M, N), dtype=torch.int32, device=device)
     z_tri = torch.empty_like(z)
 
-    kernel[(1, 1, 1)](x, z_tri, M, N, src_layout, axis, num_warps=4, sanitize_overflow=sanitize_overflow,
-                      debug=sanitize_overflow)
+    scan_kernel[(1, 1, 1)](x, z_tri, M, N, src_layout, axis, num_warps=4, sanitize_overflow=sanitize_overflow,
+                           debug=sanitize_overflow)
 
     z_ref = torch.cumsum(x, dim=axis, dtype=torch.int32)
     torch.testing.assert_close(z_tri, z_ref)
+
+
+def test_scan_blocked_broadcast_layout(device):
+    if not is_cuda():
+        pytest.skip("requires CUDA")
+    if THREADS_PER_WARP != 32:
+        pytest.skip("requires 32-thread warps")
+
+    M = 32
+    # Broadcasting in register, lane and warp
+    # - register=1 -> (1, 0)
+    # - lane=1 -> (0, 0)
+    #   lane=2 -> (2, 0)
+    #   lane=4 -> (4, 0)
+    #   lane=8 -> (8, 0)
+    #   lane=16 -> (16, 0)
+    # - warp=1 -> (0, 0)
+    #   warp=2 -> (0, 0)
+    # - block is a size 1 dimension
+    src_layout = ttgl.BlockedLayout([2, 4], [16, 2], [2, 2], [1, 0])
+
+    torch.manual_seed(0)
+    x = torch.randn((M, 1), dtype=torch.float32, device=device)
+    y = torch.empty_like(x)
+    scan_kernel[(1, )](x, y, M, 1, src_layout, 0, num_warps=4)
+
+    torch.testing.assert_close(y, torch.cumsum(x, dim=0))
+
+
+def test_scan_blocked_broadcast_layout_multiblock(device):
+    if not is_cuda():
+        pytest.skip("requires CUDA")
+    if THREADS_PER_WARP != 32:
+        pytest.skip("requires 32-thread warps")
+
+    M = 64
+    # Broadcasting in lane for dim1 and multiple scan blocks along axis 0.
+    src_layout = ttgl.BlockedLayout([2, 4], [16, 2], [1, 2], [1, 0])
+
+    torch.manual_seed(0)
+    x = torch.randn((M, 1), dtype=torch.float32, device=device)
+    y = torch.empty_like(x)
+    scan_kernel[(1, )](x, y, M, 1, src_layout, 0, num_warps=2)
+
+    torch.testing.assert_close(y, torch.cumsum(x, dim=0))
+
+
+def _funky_reduce_layouts():
+    # Broadcasting here and there and bases in a weird order
+    for axis in [0, 1]:
+        yield (ttgl.DistributedLinearLayout(
+            reg_bases=[[0, 8], [1, 0], [0, 0], [2, 0], [4, 0], [8, 0], [16, 0]],
+            lane_bases=[[0, 1], [0, 0], [64, 0], [0, 2], [0, 4]],
+            warp_bases=[[32, 0], [0, 16]],
+            block_bases=[],
+            shape=[128, 32],
+        ), axis)
+
+
+@pytest.mark.parametrize("src_layout, axis", list(_funky_reduce_layouts()))
+def test_reduce_funky_layout(src_layout, axis, device):
+    if not is_cuda():
+        pytest.skip("requires CUDA")
+    if THREADS_PER_WARP != 32:
+        pytest.skip("requires 32-thread warps")
+
+    shape = tuple(src_layout.shape)
+    num_warps = 2**len(src_layout.warp_bases)
+
+    torch.manual_seed(0)
+    x = torch.randn(shape, dtype=torch.float32, device=device)
+    y = torch.empty(shape[1 - axis], dtype=torch.float32, device=device)
+
+    @gluon.jit
+    def kernel(x_ptr, y_ptr, shape: ttgl.constexpr, axis: ttgl.constexpr, layout: ttgl.constexpr):
+        x_offs_m = ttgl.arange(0, shape[0], layout=ttgl.SliceLayout(1, layout))[:, None]
+        x_offs_n = ttgl.arange(0, shape[1], layout=ttgl.SliceLayout(0, layout))[None, :]
+        x = ttgl.load(x_ptr + x_offs_m * shape[1] + x_offs_n)
+        y = ttgl.sum(x, axis=axis)
+        y_offs = ttgl.arange(0, shape[1 - axis])
+        ttgl.store(y_ptr + y_offs, y)
+
+    kernel[(1, )](x, y, shape, axis, src_layout, num_warps=num_warps)
+
+    torch.testing.assert_close(y, torch.sum(x, dim=axis))
 
 
 def _reduce_linear_layouts():
@@ -121,8 +208,8 @@ def _reduce_layouts():
         ttgl.amd.AMDMFMALayout(version=2, instr_shape=[32, 32, 8], transposed=True, warps_per_cta=[1, 4]),
         ttgl.amd.AMDMFMALayout(version=3, instr_shape=[32, 32, 8], transposed=True, warps_per_cta=[1, 4]),
         ttgl.amd.AMDMFMALayout(version=4, instr_shape=[32, 32, 16], transposed=True, warps_per_cta=[1, 4]),
-        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warps_per_cta=[1, 4]),
-        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warps_per_cta=[1, 4]),
+        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warp_bases=[[0, 1], [0, 2]]),
+        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warp_bases=[[0, 1], [0, 2]]),
         ttgl.DotOperandLayout(
             parent=ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[2, 4], instr_shape=[16, 8]),
             operand_index=1, k_width=8),
@@ -509,13 +596,13 @@ _mma_pairs = [
     ],
     # AMD WMMA v1 layouts
     [
-        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warps_per_cta=[4, 4]),
-        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warps_per_cta=[16, 1]),
+        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warp_bases=[[0, 1], [0, 2], [1, 0], [2, 0]]),
+        ttgl.amd.AMDWMMALayout(version=1, transposed=True, warp_bases=[[1, 0], [2, 0], [4, 0], [8, 0]]),
     ],
     # AMD WMMA v2 layouts
     [
-        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warps_per_cta=[4, 4]),
-        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warps_per_cta=[16, 1]),
+        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warp_bases=[[0, 1], [0, 2], [1, 0], [2, 0]]),
+        ttgl.amd.AMDWMMALayout(version=2, transposed=True, warp_bases=[[1, 0], [2, 0], [4, 0], [8, 0]]),
     ],
 ]
 

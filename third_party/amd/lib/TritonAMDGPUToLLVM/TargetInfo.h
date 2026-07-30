@@ -68,8 +68,7 @@ public:
                   ProgramIDDim axis) const override;
 
   bool warpReduce(RewriterBase &rewriter, Location loc, SmallVector<Value> &acc,
-                  triton::ReduceOp op, unsigned numLaneToReduce,
-                  unsigned interleave) const override;
+                  triton::ReduceOp op, unsigned activeLanes) const override;
 
   std::string getMulhiFuncName(Type resultElementTy) const override;
 
@@ -100,6 +99,7 @@ public:
   // ttg.async_wait
   bool requiresAliasInfoForAsyncOps() const;
   bool supportsDirectToLdsLoadBitWidth(int bitWidth) const;
+  bool supportsDirectFromLdsStoreBitWidth(int bitWidth) const;
 
   bool supportsMultiCTALaunch() const;
   bool supportsClusterLoadBitWidth(int biwWidth) const;
