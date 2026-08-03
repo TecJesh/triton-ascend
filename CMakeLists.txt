@@ -281,6 +281,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIRIndexToLLVM
     MLIRGPUToROCDLTransforms
     MLIRUBToLLVM
+    MLIRPluginsLib
 
     # LLVM
     LLVMPasses
@@ -396,6 +397,7 @@ endif()
 
 add_subdirectory(bin)
 add_subdirectory(test)
+add_subdirectory(examples)
 
 if(TRITON_BUILD_UT)
   add_subdirectory(unittest)

@@ -30,7 +30,9 @@ public:
                Value cmp) const override;
 
   void barrier(Location loc, RewriterBase &rewriter,
-               bool isWarpSync = false) const override;
+               triton::gpu::AddrSpace targets) const override;
+
+  void warpSync(Location loc, RewriterBase &rewriter) const override;
 
   void storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
                     std::optional<Value> ctaId, Value val,
@@ -68,7 +70,8 @@ public:
                   ProgramIDDim axis) const override;
 
   bool warpReduce(RewriterBase &rewriter, Location loc, SmallVector<Value> &acc,
-                  triton::ReduceOp op, unsigned activeLanes) const override;
+                  triton::ReduceOp op, unsigned numLaneToReduce,
+                  unsigned interleave) const override;
 
   std::string getMulhiFuncName(Type resultElementTy) const override;
 
@@ -102,6 +105,7 @@ public:
   bool supportsDirectFromLdsStoreBitWidth(int bitWidth) const;
 
   bool supportsMultiCTALaunch() const;
+  bool supportsTDM() const;
   bool supportsClusterLoadBitWidth(int biwWidth) const;
 
   void localLoadOpAnnotation(triton::gpu::LocalLoadOp localLoadOp,

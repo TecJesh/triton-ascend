@@ -565,7 +565,7 @@ void createBarrier(ConversionPatternRewriter &rewriter, Location loc,
                    int numCTAs) {
   auto b = TritonLLVMOpBuilder(loc, rewriter);
   if (numCTAs == 1) {
-    b.barrier();
+    b.barrier(ttg::AddrSpace::Local);
   } else {
     triton::nvidia_gpu::ClusterArriveOp::create(rewriter, loc, false);
     triton::nvidia_gpu::ClusterWaitOp::create(rewriter, loc);
@@ -951,7 +951,8 @@ public:
 
           // Recover values from predicated block (from SMEM)
           rewriter.setInsertionPointToStart(endBlock);
-          b.barrier();
+          b.barrier(ttg::AddrSpace::Local);
+
           Value ret = b.load(valueElemTy, atomPtr);
           rewriter.replaceOp(op, {ret});
           return success();
@@ -1247,10 +1248,9 @@ struct AsyncCopyGlobalToLocalOpConversion
     auto affineOffset = smemObj.getShmemOffset(loc, rewriter, dstTy);
     auto maskSpanAffineOffset = SharedMemoryObject::getMaskSpanOffsets(dstTy);
     auto [laneId, warpId] = getLaneAndWarpId(rewriter, loc);
-    lowerLdSt(
-        loc, ctx, cvt, vals, resElemTy, smemObj.getBase(),
-        [](Value v) { return v; }, affineOffset, maskSpanAffineOffset, laneId,
-        warpId, rewriter, targetInfo, maxVec, emitCpAsync);
+    lowerLdSt(loc, ctx, cvt, vals, resElemTy, smemObj.getBase(),
+              /*paddingShifts=*/{}, affineOffset, maskSpanAffineOffset, laneId,
+              warpId, rewriter, targetInfo, maxVec, emitCpAsync);
 
     // Drop the result token.
     Value zero = LLVM::ConstantOp::create(rewriter, op.getLoc(),
