@@ -346,16 +346,18 @@ index e0cf353da207..6bd0b89e5517 100644
    return !bufferizesToMemoryWrite(opOperand);
  }
 diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
-index 56ff2121e462..5d1d7a165c3d 100644
+index 71ad8bbf91c3..52788a82faa6 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
 +++ b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
-@@ -15,4 +15,5 @@
+@@ -14,6 +14,7 @@
  #include "mlir/Dialect/Tensor/IR/Tensor.h"
  #include "mlir/Dialect/Utils/VerificationUtils.h"
  #include "mlir/IR/Matchers.h"
 +#include "mlir/Interfaces/InferTypeOpInterface.h"
+ #include "llvm/ADT/SmallVectorExtras.h"
  #include <optional>
-@@ -127,6 +128,53 @@ LogicalResult mlir::bufferization::foldToBufferToTensorPair(
+ 
+@@ -129,6 +130,53 @@
    return success();
  }
  
@@ -409,11 +411,10 @@ index 56ff2121e462..5d1d7a165c3d 100644
  void mlir::bufferization::populateDynamicDimSizes(
      OpBuilder &b, Location loc, Value shapedValue,
      SmallVector<Value> &dynamicDims) {
-@@ -750,6 +798,101 @@ bool ToTensorOp::isWritable(Value value, const AnalysisState &state) {
+@@ -753,6 +801,101 @@
    return getWritable();
  }
  
-+
 +ParseResult ToTensorOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
 +  ::mlir::OpAsmParser::UnresolvedOperand bufferRawOperand{};
 +  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> bufferOperands(&bufferRawOperand, 1);  ::llvm::SMLoc bufferOperandsLoc;
@@ -508,10 +509,11 @@ index 56ff2121e462..5d1d7a165c3d 100644
 +  // }
 +}
 +
++
  OpFoldResult ToTensorOp::fold(FoldAdaptor) {
    if (auto toBuffer = getBuffer().getDefiningOp<ToBufferOp>())
      // Approximate alias analysis by conservatively folding only when no there
-@@ -757,6 +900,12 @@ OpFoldResult ToTensorOp::fold(FoldAdaptor) {
+@@ -760,6 +903,12 @@
      if (toBuffer->getBlock() == this->getOperation()->getBlock() &&
          toBuffer->getNextNode() == this->getOperation())
        return toBuffer.getTensor();
@@ -524,11 +526,10 @@ index 56ff2121e462..5d1d7a165c3d 100644
    return {};
  }
  
-@@ -1198,6 +1347,107 @@ void bufferization::populateDeallocOpCanonicalizationPatterns(
-                RemoveAllocDeallocPairWhenNoOtherUsers>(context);
+@@ -1202,6 +1351,107 @@
  }
  
-+//===----------------------------------------------------------------------===//
+ //===----------------------------------------------------------------------===//
 +// ToMemrefOp
 +//===----------------------------------------------------------------------===//
 +
@@ -624,14 +625,15 @@ index 56ff2121e462..5d1d7a165c3d 100644
 +                                    BufferizationState &state) {
 +  // Fold to_memref(to_tensor(x)) to x. Insert a cast if necessary.
 +  (void)foldToMemrefToTensorPair(rewriter, *this, options);
-+  // Note: The return value of `bufferize` indicates whether there was an error
++  // Note: The return value of 'bufferize' indicates whether there was an error
 +  // or not. (And not whether the pattern matched or not.)
 +  return success();
 +}
 +
- //===----------------------------------------------------------------------===//
++//===----------------------------------------------------------------------===//
  // TableGen'd op method definitions
  //===----------------------------------------------------------------------===//
+ 
 diff --git a/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp b/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp
 index 582593adfa5c..a81a84bae601 100644
 --- a/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp
