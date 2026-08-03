@@ -349,14 +349,12 @@ diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp b/mlir/lib/D
 index 56ff2121e462..5d1d7a165c3d 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
 +++ b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
-@@ -13,6 +13,7 @@
- #include "mlir/Dialect/MemRef/IR/MemRef.h"
+@@ -15,4 +15,5 @@
  #include "mlir/Dialect/Tensor/IR/Tensor.h"
+ #include "mlir/Dialect/Utils/VerificationUtils.h"
  #include "mlir/IR/Matchers.h"
 +#include "mlir/Interfaces/InferTypeOpInterface.h"
  #include <optional>
- 
- using namespace mlir;
 @@ -127,6 +128,53 @@ LogicalResult mlir::bufferization::foldToBufferToTensorPair(
    return success();
  }
@@ -1524,23 +1522,12 @@ index a9da6c2c8320..4ebc46deae3d 100644
    newForOp->setAttrs(forOp->getAttrs());
    Block &newBlock = newForOp.getRegion().front();
    SmallVector<Value, 4> newBlockTransferArgs(newBlock.getArguments().begin(),
-@@ -980,7 +973,7 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
-     scf::ForOp newForOp =
-         scf::ForOp::create(rewriter, forOp.getLoc(), forOp.getLowerBound(),
-                            forOp.getUpperBound(), forOp.getStep(), newIterArgs,
--                           /*bodyBuilder=*/nullptr, forOp.getUnsignedCmp());
-+                           /*bodyBuilder=*/nullptr, false);
-     newForOp->setAttrs(forOp->getAttrs());
-     Block &newBlock = newForOp.getRegion().front();
- 
-@@ -1175,7 +1168,7 @@ Speculation::Speculatability ForOp::getSpeculatability() {
- 
- std::optional<APInt> ForOp::getStaticTripCount() {
+
    return constantTripCount(getLowerBound(), getUpperBound(), getStep(),
 -                           /*isSigned=*/!getUnsignedCmp(), computeUbMinusLb);
 +                           /*isSigned=*/!false, computeUbMinusLb);
  }
- 
+
  //===----------------------------------------------------------------------===//
 diff --git a/mlir/lib/IR/AsmPrinter.cpp b/mlir/lib/IR/AsmPrinter.cpp
 index 3d19c5ad8fbc..a72b51ad0d9d 100644
