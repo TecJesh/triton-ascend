@@ -5,7 +5,7 @@
 简介：计算x和y的逐元素精确除法。
 
 ```python
-triton.language.div_rn(x, y, _semantic=None)
+triton.language.div_rn(x, y)
 ```
 
 ## 2. 规格
@@ -25,12 +25,17 @@ triton.language.div_rn(x, y, _semantic=None)
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | ×    | √    | ×    | ×    | ×    |
-| Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | × | × | × | × | × | × | × | × | √ | × | × | × | × | × |
+| Ascend A2/A3 | × | × | × | × | × | × | × | × | √ | √ | × | √ | × | × | × |
+| Ascend 950 | × | × | × | × | × | × | × | × | × | √ | × | × | × | × | × |
 
 结论：Ascend 相比 GPU 额外支持 fp16、bf16。
+
+结论：
+- Ascend A2/A3 对比 GPU 无缺失的数据类型。
+- Ascend 950 对比 GPU 无缺失的数据类型。
 torch 对 uint8 支持。
 
 #### 2.2.2 Shape 支持
