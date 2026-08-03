@@ -5,7 +5,7 @@
 简介：返回输入张量 `x` 沿指定维度的前 `k` 个最大元素，返回结果按从大到小排序。
 
 ```python
-triton.language.topk(x, k, dim: constexpr | None = None)
+triton.language.topk(x, k: constexpr, dim: constexpr = None)
 ```
 
 ## 2. 规格
@@ -25,12 +25,15 @@ triton.language.topk(x, k, dim: constexpr | None = None)
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | √    | √     | √     | √     | ×      | ×      | ×      | √     | √    | √    | √    | √    | √    |
-| Ascend A2/A3 | √ | √ | × | × | × | × | × | × | √ | √ | × | √ | × |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | × | √ | × | √ | × | × | × | × | √ | √ | × | √ | × | × | × |
+| Ascend 950 | × | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | √ | √ | × |
 
-结论：Ascend 相比 GPU 缺失 int32、uint8、int64、float64、bool 支持。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint8、int32、int64、fp64、bool 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 torch_npu 支持 uint8。
 
 #### 2.2.2 Shape 支持
