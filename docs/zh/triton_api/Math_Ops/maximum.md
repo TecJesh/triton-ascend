@@ -6,7 +6,7 @@
 函数原型（Triton3.4.0版本）：
 
 ```python
-triton.language.maximum(x, y, propagate_nan: ~triton.language.core.constexpr = <PROPAGATE_NAN.NONE: 0>, _semantic=None)¶
+triton.language.maximum(x, y, propagate_nan=triton.language.PropagateNan.ALL)
 ```
 
 ## 2. 规格
@@ -27,12 +27,15 @@ triton.language.maximum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | √    | √     | √     | ×     | ×     | ×      | ×      | √     | √    | √    | √    | √    | √    |
-| Ascend A2/A3| √    | √     | √     | √     | ×     | ×      | ×      | √     | √    | √    | ×    | √    | √    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | √ |
 
-结论：Ascend 相比 GPU 缺失 fp64 支持。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 
