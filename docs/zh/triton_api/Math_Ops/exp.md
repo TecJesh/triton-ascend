@@ -27,8 +27,7 @@
 | Ascend 950 | × | × | × | × | × | × | × | × | √ | √ | × | × | × | × | × |
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力，但额外支持 fp16。
+- Ascend 对比 GPU 缺失 fp64 的支持能力,但额外支持 fp16。
 torch_npu不支持uint8。
 
 #### 2.2.2 Shape 支持
