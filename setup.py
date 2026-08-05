@@ -986,10 +986,7 @@ MAX_PYTHON = (3, 14)
 
 PYTHON_REQUIRES = f">={MIN_PYTHON[0]}.{MIN_PYTHON[1]},<{MAX_PYTHON[0]}.{MAX_PYTHON[1] + 1}"
 BASE_CLASSIFIERS = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Topic :: Software Development :: Build Tools",
-    "License :: OSI Approved :: MIT License",
+    "Development Status :: 4 - Beta", "Intended Audience :: Developers", "Topic :: Software Development :: Build Tools"
 ]
 PYTHON_CLASSIFIERS = [
     f"Programming Language :: Python :: {MIN_PYTHON[0]}.{m}" for m in range(MIN_PYTHON[1], MAX_PYTHON[1] + 1)
@@ -1078,6 +1075,8 @@ setup(
     author_email="phil@openai.com",
     description="A language and compiler for custom Deep Learning operations",
     long_description=long_description,
+    license="MIT",
+    install_requires=get_install_requirements(),
     packages=list(get_packages()),
     package_dir=dict(get_package_dirs()),
     entry_points=get_entry_points(),
@@ -1100,8 +1099,6 @@ setup(
     url="https://gitcode.com/Ascend/triton-ascend/",
     python_requires=PYTHON_REQUIRES,
     classifiers=CLASSIFIERS,
-    test_suite="tests",
-    install_requires=get_install_requirements(),
     extras_require={
         "build": [
             "cmake>=3.20,<4.0",
