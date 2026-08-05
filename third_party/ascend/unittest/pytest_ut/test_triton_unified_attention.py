@@ -331,8 +331,8 @@ def ref_paged_attn(
     outputs: list[torch.Tensor] = []
     start_idx = 0
     for i in range(num_seqs):
-        query_len = query_lens[i]
-        kv_len = kv_lens[i]
+        query_len = int(query_lens[i])
+        kv_len = int(kv_lens[i])
         q = query[start_idx:start_idx + query_len]
         q *= scale
 
