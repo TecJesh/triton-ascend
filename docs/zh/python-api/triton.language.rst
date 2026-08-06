@@ -16,6 +16,7 @@ Programming Model
     tensor_descriptor
     program_id
     num_programs
+    map_elementwise
 
 Creation Ops
 ------------
