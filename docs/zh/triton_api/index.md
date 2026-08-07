@@ -308,6 +308,7 @@ Random_Number_Generation/index.md
 |[max](./Reduction_Ops/max.md) |返回沿指定 axis 轴上 input 张量中所有元素的最大值 |
 |[min](./Reduction_Ops/min.md) |返回沿指定 axis 轴上 input 张量中所有元素的最小值 |
 |[reduce](./Reduction_Ops/reduce.md) |将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素 |
+|[reduce_or](./Reduction_Ops/reduce_or.md) |返回 input 张量中，沿指定 axis 的所有元素的逻辑或 |
 |[sum](./Reduction_Ops/sum.md) |返回 input 张量中，沿指定 axis 的所有元素的总和 |
 |[xor_sum](./Reduction_Ops/xor_sum.md) |返回 input 张量中，沿指定 axis 的所有元素的异或和 |
 
@@ -327,6 +328,7 @@ Reduction_Ops/index.md
 |[cumsum](./Scan_Sort_Ops/cumsum.md)  |返回沿指定 axis 的 input 张量中所有元素的累积和 |
 |[histogram](./Scan_Sort_Ops/histogram.md) |基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始值为0 |
 |[sort](./Scan_Sort_Ops/sort.md) |沿着指定维度对张量进行排序 |
+|[topk](./Scan_Sort_Ops/topk.md) |返回沿指定维度的前 k 个最大元素 |
 
 ```{toctree}
 :maxdepth: 3

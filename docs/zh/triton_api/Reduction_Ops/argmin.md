@@ -31,7 +31,6 @@ triton.language.argmin(input, axis, tie_break_left=True, keep_dims=False)
 | GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | √ |
 | Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
 | Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
-|Ascend A2A3系列| √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ |
 
 #### 2.2.2 Shape 支持
 

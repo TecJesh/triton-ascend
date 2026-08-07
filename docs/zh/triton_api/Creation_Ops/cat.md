@@ -5,7 +5,7 @@
 简介：`triton.language.cat`函数用于将指定的tensor进行拼接。
 
 ```python
-triton.language.cat(lhs, rhs)
+triton.language.cat(input, other, can_reorder)
 ```
 
 ## 2. OP 规格
@@ -16,7 +16,7 @@ triton.language.cat(lhs, rhs)
 | ------------- | ----------------- | ---------------------------- |
 | `input`           | `Tensor`               | 拼接的第一个tensor |
 | `other`            | `Tensor`               | 拼接的第二个tensor |
-| `can_reorder`            | `Bool`               | 编译器提示 - 当为True时，允许编译器在连接输入时重新排序元素以优化性能。  |
+| `can_reorder`            | `Bool`               | 编译器提示 - 当为True时，允许编译器在连接输入时重新排序元素以优化性能, 默认False。  |
 
 返回值：
 `tensor`：完成拼接之后的tensor

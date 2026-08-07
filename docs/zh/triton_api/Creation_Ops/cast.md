@@ -6,8 +6,8 @@
 
 **语法：**
 
-- `triton.language.cast(input, dst_ty, fp_downcast_rounding=None)` - 函数调用形式
-- `input.to(dst_ty, fp_downcast_rounding=None)` - 成员函数形式
+- `triton.language.cast(input, dtype, fp_downcast_rounding=None, bitcast)` - 函数调用形式
+- `input.to(dtype, fp_downcast_rounding=None, bitcast)` - 成员函数形式
 
 **功能：**
 
@@ -26,7 +26,6 @@
 | dtype | tl.dtype | 是 | 目标数据类型 |
 | fp_downcast_rounding | str | 否 | 仅对浮点降精度有效，`rtne` 或 `rtz` |
 | bitcast | bool | 否 | 是否执行位级别重解释，默认 False |
-| overflow_mode | str | 否 | Ascend 扩展：整数溢出处理，`trunc` 或 `saturate` |
 
 **返回值：**
 
@@ -39,7 +38,6 @@
 
 - `fp_downcast_rounding` 仅在浮点降精度时可设置，否则将报错
 - `bitcast=True` 时不进行数值转换，忽略舍入/溢出模式
-- `overflow_mode` 仅对整型有意义（Ascend 扩展）
 
 ### 2.2 DataType支持表
 
@@ -99,7 +97,7 @@ def cast_advanced_example():
     z = x.cast(tl.float16, fp_downcast_rounding="rtz")
 
     # float32 → int8，启用饱和模式（Ascend 扩展，超出 int8 范围的值会被截断到 [-128, 127]）
-    w = x.cast(tl.int8, overflow_mode="saturate")
+    w = x.cast(tl.int8)
 
     return y, z, w
 ```
@@ -113,7 +111,7 @@ def quantization_kernel(x_ptr, output_ptr, scale, zero_point, M, N, BLOCK_M: tl.
     x = tl.load(x_ptr + offsets, mask=mask)
 
     # 量化：转换为int8
-    x_quantized = tl.cast(x * scale + zero_point, tl.int8, overflow_mode="saturate")
+    x_quantized = tl.cast(x * scale + zero_point, tl.int8)
 
     # 存储量化结果
     tl.store(output_ptr + offsets, x_quantized, mask=mask)

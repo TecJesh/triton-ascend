@@ -62,8 +62,9 @@
 
 
 结论：
-- Ascend A2/A3 对比 GPU 无缺失的数据类型。
-- Ascend 950 对比 GPU 无缺失的数据类型。
+- Ascend A2/A3/950 对比 GPU 无缺失的数据类型。
+
+
 **说明：**
 
 - index 的数据类型必须为 int32 或 int64
