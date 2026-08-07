@@ -93,7 +93,22 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3/950 does not support fp8, fp64.",
         ],
-        "example": "triton.language.add",
+        "example":
+        "triton.language.add",
+        "replace_docstring": [
+            "Computes the element-wise sum of x and y.",
+            "",
+            "This is the function form of the + operator.",
+            "",
+            ":param x: the first input tensor",
+            ":type x: Block",
+            ":param y: the second input tensor",
+            ":type y: Block",
+            ":param sanitize_overflow: insert an integer-overflow check when overflow",
+            "    sanitization is enabled at compile time; set to False to emit plain",
+            "    wrapping arithmetic. Ignored for floating-point operands.",
+            ":type sanitize_overflow: bool",
+        ],
     },
     "triton.language.advance": {
         "constraints": [
@@ -878,6 +893,27 @@ CONSTRAINTS = {
         "example":
         "triton.language.mod",
     },
+    "triton.language.mul": {
+        "constraints": [
+            "DataType: Ascend A2/A3/950 does not support fp8, fp64.",
+        ],
+        "example":
+        "triton.language.mul",
+        "replace_docstring": [
+            "Computes the element-wise product of x and y.",
+            "",
+            "This is the function form of the * operator.",
+            "",
+            ":param x: the first input tensor",
+            ":type x: Block",
+            ":param y: the second input tensor",
+            ":type y: Block",
+            ":param sanitize_overflow: insert an integer-overflow check when overflow",
+            "    sanitization is enabled at compile time; set to False to emit plain",
+            "    wrapping arithmetic. Ignored for floating-point operands.",
+            ":type sanitize_overflow: bool",
+        ],
+    },
     "triton.language.multiple_of": {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64, \
@@ -896,6 +932,9 @@ CONSTRAINTS = {
     "triton.language.rand": {
         "example": "triton.language.rand",
     },
+    "triton.language.rand4x": {
+        "example": "triton.language.rand4x",
+    },
     "triton.language.randint": {
         "example": "triton.language.randint",
     },
@@ -904,6 +943,9 @@ CONSTRAINTS = {
     },
     "triton.language.randn": {
         "example": "triton.language.randn",
+    },
+    "triton.language.randn4x": {
+        "example": "triton.language.randn4x",
     },
     "triton.language.range": {
         "constraints": [
@@ -1010,7 +1052,30 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend does not support bool, fp64, int32, int64, uint8.",
         ],
-        "example": "triton.language.topk",
+        "example":
+        "triton.language.topk",
+        "replace_docstring": [
+            "Returns the k largest (or smallest) elements of the input tensor along",
+            "the specified dimension.",
+            "",
+            "The elements are returned in sorted order (largest first).",
+            "",
+            ":param x: The input tensor.",
+            ":type x: Tensor",
+            ":param k: The number of top elements to return. Must be a positive power",
+            "    of two no larger than the selected dimension.",
+            ":type k: int",
+            ":param dim: The dimension along which to find the top k elements. If",
+            "    None, uses the last dimension. Currently only the last dimension is",
+            "    supported.",
+            ":type dim: int, optional",
+            ":param descending: If set to True, returns k largest elements. If set to",
+            "    False, returns k smallest elements.",
+            ":type descending: bool, optional",
+            ":returns: A tensor containing the k largest elements along the specified",
+            "    dimension.",
+            ":rtype: Tensor",
+        ],
     },
     "triton.language.extra.cann.extension.sort": {
         "constraints": [
@@ -1151,7 +1216,22 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3/950 does not support fp8, fp64.",
         ],
-        "example": "triton.language.sub",
+        "example":
+        "triton.language.sub",
+        "replace_docstring": [
+            "Computes the element-wise difference of x and y.",
+            "",
+            "This is the function form of the - operator.",
+            "",
+            ":param x: the first input tensor",
+            ":type x: Block",
+            ":param y: the second input tensor",
+            ":type y: Block",
+            ":param sanitize_overflow: insert an integer-overflow check when overflow",
+            "    sanitization is enabled at compile time; set to False to emit plain",
+            "    wrapping arithmetic. Ignored for floating-point operands.",
+            ":type sanitize_overflow: bool",
+        ],
     },
     "triton.language.sum": {
         "constraints": [

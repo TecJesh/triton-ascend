@@ -96,6 +96,7 @@ Math Ops
     :nosignatures:
 
     abs
+    add
     cdiv
     ceil
     clamp
@@ -111,12 +112,14 @@ Math Ops
     log2
     maximum
     minimum
+    mul
     rsqrt
     sigmoid
     sin
     softmax
     sqrt
     sqrt_rn
+    sub
     umulhi
 
 Reduction Ops
@@ -148,7 +151,6 @@ Scan/Sort Ops
     histogram
     sort
     topk
-    bitonic_merge
 
 Atomic Ops
 ----------
@@ -176,7 +178,9 @@ Random Number Generation
     randint4x
     randint
     rand
+    rand4x
     randn
+    randn4x
 
 Iterators
 ---------
