@@ -30,18 +30,17 @@ triton.language.log2(x)
 | Ascend 950 | × | × | × | × | × | × | × | × | × | √ | × | × | × | × | × |
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
-torch_npu 支持 uint8。
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |
 | ------ | --------------- |
-| GPU    | 仅支持 1~5维 tensor |
-| Ascend A2/A3 | 仅支持 1~5维 tensor |
+| GPU    | 仅支持 1~8维 tensor |
+| Ascend A2/A3 | 仅支持 1~8维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 ### 2.3 特殊限制说明
 

@@ -28,8 +28,9 @@ A3：
 
 
 结论：
-- Ascend A2/A3 对比 GPU 无缺失的数据类型。
-- Ascend 950 对比 GPU 无缺失的数据类型。
+- Ascend A2/A3/950 对比 GPU 无缺失的数据类型。
+
+
 ### 2.3 使用方法
 
 ```python

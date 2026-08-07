@@ -55,7 +55,7 @@ triton.language.store(
 | GPU    | 支持scalar和1~5维 tensor |
 | Ascend | 支持scalar和1~5维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 #### 2.2.3 社区约束
 

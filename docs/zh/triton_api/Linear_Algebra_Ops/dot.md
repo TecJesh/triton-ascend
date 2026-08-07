@@ -7,7 +7,7 @@
 
 
 ```python
-triton.language.dot(lhs, rhs, acc=None, input_precision=None, max_num_imprecise_acc=None, out_dtype=triton.language.float32)
+triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_imprecise_acc=None, out_dtype)
 ```
 
 
@@ -17,12 +17,13 @@ triton.language.dot(lhs, rhs, acc=None, input_precision=None, max_num_imprecise_
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `input`        | `int8 fp16 bf16 fp32`     |     第一个输入，2D or 3D 张量， 为了避免溢出 取值范围限制为-5-5     |
-| `other`       | `int8 fp16 bf16 fp32`     |     第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5    |
-| `acc`           | `int32  float32`    | 存累加结果的张量, accumulator tensor. If not None, the result is added to this tensor, acc_dtype支持 {:code:`float16`, :code:`float32`, :code:`int32`} |
-| `input_precision`   | -                 |  NVIDIA 通过选择精度模式来决定是否启用 Tensor Cores 加速    |
+| `input`        | `tensor`     |     第一个输入，2D or 3D 张量， 为了避免溢出 取值范围限制为-5-5     |
+| `other`       | `tensor`     |     第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5    |
+| `acc`           | `tensor`    | 存累加结果的张量, accumulator tensor. If not None, the result is added to this tensor, acc_dtype支持 {:code:`float16`, :code:`float32`, :code:`int32`} |
+| `input_precision`   | `str` | 控制 f32 x f32 输入的精度模式。支持类型 :`"ieee"` 和 `"hf32"`，默认`"ieee"`。不支持 :`"tf32"`，设置`"tf32"`会转换为`"hf32"`。 |
+| `allow_tf32` | `bool` | 若设为 True，等价于 `input_precision="tf32"`， |
 | `max_num_imprecise_acc`     | `int`    | 多少次低精度的累加数（当前昇腾不支持低精度累加） |
-| `out_dtype`     | `fp32  int32`    | 输出结果类型|
+| `out_dtype`     | `str`    | 输出结果类型|
 
 返回值：
 `tl.tensor`：矩阵乘结果
@@ -38,8 +39,7 @@ triton.language.dot(lhs, rhs, acc=None, input_precision=None, max_num_imprecise_
 | Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 
