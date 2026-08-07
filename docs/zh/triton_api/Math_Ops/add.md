@@ -36,8 +36,8 @@ triton.language.add(input, other, sanitize_overflow=True)
 
 
 结论：
-- Ascend A2/A3 对比 GPU 无缺失的数据类型。
-- Ascend 950 对比 GPU 无缺失的数据类型。
+- Ascend A2/A3/950 对比 GPU 缺少fp64数据类型支持。
+
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |

@@ -34,11 +34,12 @@ triton.language.arange(start, end)
 
 
 结论：
-- Ascend A2/A3 对比 GPU Ascend A2/A3 对比 GPU 无缺失的数据类型。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+ - Ascend A2/A3 对比 GPU 缺失 int32 的支持能力。
+ - Ascend 950 对比 GPU 无缺失的数据类型。
+
 #### 2.2.2 Shape 支持
 
-0 <= (end - start) < 1048576
+0 <= (end - start) <= 1048576
 end >= 0,  start  >= 0
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。

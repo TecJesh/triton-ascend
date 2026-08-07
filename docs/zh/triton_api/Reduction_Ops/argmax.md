@@ -35,7 +35,6 @@ triton.language.argmax(input, axis, tie_break_left=True, keep_dims=False)
 结论：
 - Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
 - Ascend 950 对比 GPU 无缺失的数据类型。
-|Ascend A2A3系列| √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ |
 
 #### 2.2.2 Shape 支持
 

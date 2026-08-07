@@ -45,8 +45,8 @@ triton.language.atomic_xchg(
 
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 #### 2.2.2 Shape 支持
 
 无特殊要求，默认八维

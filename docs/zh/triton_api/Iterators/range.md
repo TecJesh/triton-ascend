@@ -38,7 +38,7 @@ triton.language.range(arg1, arg2=None, step=None, num_stages=None, loop_unroll_f
 > 相对社区能力缺失且无法实现
 
 结论：Ascend A2/A3 对比 GPU 缺失 uint8、uint16、uint32、uint64 的支持能力。
-Ascend 950 对比 GPU 五缺失。
+Ascend 950 对比 GPU 无缺失。
 disallow_acc_multi_buffer, flatten, warp_specialize, disable_licm 相关功能还不全。
 
 ### 2.4 使用方法

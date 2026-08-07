@@ -43,8 +43,8 @@ triton.language.ceil(x)
 > 相对社区能力缺失且无法实现
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 
 ### 2.4 使用方法
 

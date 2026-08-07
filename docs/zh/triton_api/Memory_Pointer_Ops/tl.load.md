@@ -48,8 +48,8 @@ triton.language.load(
 | Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
-- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 
 #### 2.2.2 Shape 支持
 
@@ -58,7 +58,7 @@ triton.language.load(
 | GPU    | 支持scalar和1~5维tensor |
 | Ascend A2/A3 | 支持scalar和1~5维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 #### 2.2.3 社区约束
 

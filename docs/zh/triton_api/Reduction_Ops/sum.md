@@ -37,8 +37,9 @@ triton.language.sum(input, axis=None, keep_dims=False)
 
 
 结论：
-- Ascend A2/A3 对比 GPU 无缺失的数据类型。
-- Ascend 950 对比 GPU 无缺失的数据类型。
+- Ascend A2/A3/950 对比 GPU 无缺失的数据类型。
+
+
 #### 2.2.2 Shape 支持
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。
