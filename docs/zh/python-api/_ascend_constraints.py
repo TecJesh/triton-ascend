@@ -53,9 +53,10 @@ CONSTRAINTS = {
     },
     "triton.language.permute": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.permute",
+        "example":
+        "triton.language.permute",
     },
     "triton.heuristics": {
         "example": "triton.heuristics",
@@ -83,15 +84,13 @@ CONSTRAINTS = {
     },
     "triton.language.abs": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64, \
-                Ascend 950 does not support fp64.",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
-        "example":
-        "triton.language.abs",
+        "example": "triton.language.abs",
     },
     "triton.language.add": {
         "constraints": [
-            "DataType: Ascend A2/A3/950 does not support fp8, fp64.",
+            "DataType: Ascend A2/A3/950 does not support fp64.",
         ],
         "example":
         "triton.language.add",
@@ -229,13 +228,14 @@ CONSTRAINTS = {
     },
     "triton.language.broadcast": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.broadcast",
+        "example":
+        "triton.language.broadcast",
     },
     "triton.language.broadcast_to": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
             "The rank of the input tensor's shape must match the rank of the target shape.",
         ],
         "example":
@@ -243,15 +243,18 @@ CONSTRAINTS = {
     },
     "triton.language.cast": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.cast",
+        "example":
+        "triton.language.cast",
     },
     "triton.language.cat": {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64.",
+            "Only support 1D tensor concatenation.",
         ],
-        "example": "triton.language.cat",
+        "example":
+        "triton.language.cat",
     },
     "triton.language.cdiv": {
         "constraints": [
@@ -386,14 +389,42 @@ CONSTRAINTS = {
     },
     "triton.language.dot_scaled": {
         "constraints": [
-            "DataType: Ascend A2/A3/950 does not support fp4, fp8.",
-            "``lhs_k_pack``: does not support fp4,fp8.",
-            "``rhs_k_pack``: does not support fp4,fp8.",
-            "Ascend does not support fp4, fp8.",
+            "DataType: Ascend A2/A3 does not support fp4/fp8, Ascend 950 does not support fp4.",
+            "``lhs_k_pack``: not supported on Ascend.",
+            "``rhs_k_pack``: not supported on Ascend.",
             "the recommended input range for the input matrices lhs and rhs is [-5, 5]",
         ],
         "example":
         "triton.language.dot_scaled",
+        "replace_docstring": [
+            "Returns the matrix product of two blocks in microscaling format.",
+            "",
+            "lhs and rhs use microscaling formats described here:",
+            "https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf",
+            "",
+            ":param lhs: the first tensor to be multiplied.",
+            ":type lhs: 2D tensor of bf16 or fp16 elements.",
+            ":param lhs_scale: scale factor for lhs tensor, represented as an int8 tensor.",
+            "    Shape should be [M, K // 32] when lhs is [M, K].",
+            ":type lhs_scale: int8 tensor",
+            ":param lhs_format: format of the lhs tensor. Supported: :code:`\"bf16\"`, :code:`\"fp16\"`.",
+            ":type lhs_format: str",
+            ":param rhs: the second tensor to be multiplied.",
+            ":type rhs: 2D tensor of bf16 or fp16 elements.",
+            ":param rhs_scale: scale factor for rhs tensor, represented as an int8 tensor.",
+            "    Shape should be [N, K // 32] when rhs is [K, N].",
+            ":type rhs_scale: int8 tensor",
+            ":param rhs_format: format of the rhs tensor. Supported: :code:`\"bf16\"`, :code:`\"fp16\"`.",
+            ":type rhs_format: str",
+            ":param acc: the accumulator tensor. If not None, the result is accumulated into it.",
+            ":type acc: 2D tensor of float32",
+            ":param fast_math: if True, enables faster but potentially less accurate math.",
+            ":type fast_math: bool",
+            ":param out_dtype: the output data type. Supported: :code:`float32`, :code:`float16`, :code:`bfloat16`.",
+            ":type out_dtype: tl.dtype",
+            ":returns: the matrix product of lhs and rhs in microscaling format.",
+            ":rtype: tensor",
+        ],
     },
     "triton.language.equal": {
         "constraints": [
@@ -421,9 +452,10 @@ CONSTRAINTS = {
     },
     "triton.language.expand_dims": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.expand_dims",
+        "example":
+        "triton.language.expand_dims",
     },
     "triton.language.fdiv": {
         "constraints": [
@@ -433,7 +465,7 @@ CONSTRAINTS = {
     },
     "triton.language.extra.cann.extension.index_select_simd": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
             "``index``: The data type of the index must be int32 or int64.",
             "``dim``: The dimension cannot be the trailing axis (the last dimension), i.e., dim < len(src_shape) - 1.",
             "The index_select operation is not supported along the trailing axis (the last dimension).",
@@ -654,15 +686,17 @@ CONSTRAINTS = {
     },
     "triton.language.interleave": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.interleave",
+        "example":
+        "triton.language.interleave",
     },
     "triton.language.join": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.join",
+        "example":
+        "triton.language.join",
     },
     "triton.language.less_equal": {
         "constraints": [
@@ -740,9 +774,7 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64, \
                 Ascend 950 does not support fp64.",
-            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
-                must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
-            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
         "example":
         "triton.language.load_tensor_descriptor",
@@ -814,9 +846,7 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64, \
                 Ascend 950 does not support fp64.",
-            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
-                must be used as a suite in Triton 3.6.x. Do not mix them with `tl.load()` or `tl.store()`.",
-            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.6.x."
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
         "example":
         "triton.language.make_tensor_descriptor",
@@ -839,7 +869,7 @@ CONSTRAINTS = {
     },
     "triton.language.max": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64; Ascend 950 does not fp64.",
+            "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64; Ascend 950 does not support fp64.",
             "``return_indices``: return_indices=True is not supported when axis=None.",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
         ],
@@ -872,7 +902,7 @@ CONSTRAINTS = {
     },
     "triton.language.min": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64; Ascend 950 does not fp64, fp8e4(E4M3), fp8e5(E5M2).",
+            "DataType: Ascend A2/A3 does not support  uint16, uint32, uint64, fp64; Ascend 950 does not support fp64.",
             "``return_indices``: return_indices=True is not supported when axis=None.",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
         ],
@@ -990,7 +1020,7 @@ CONSTRAINTS = {
     },
     "triton.language.ravel": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64, Ascend 950 does not support fp64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
         "example":
         "triton.language.ravel",
@@ -1009,7 +1039,7 @@ CONSTRAINTS = {
     },
     "triton.language.reshape": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64, Ascend 950 does not support fp64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
             "``can_reorder``: Only supports False",
         ],
         "example":
@@ -1050,7 +1080,7 @@ CONSTRAINTS = {
     },
     "triton.language.topk": {
         "constraints": [
-            "DataType: Ascend does not support bool, fp64, int32, int64, uint8.",
+            "DataType: Ascend A2/A3 does not support bool, fp64, int32, int64, uint8, Ascend 950 does not support uint8, fp64, bool.",
         ],
         "example":
         "triton.language.topk",
@@ -1097,9 +1127,10 @@ CONSTRAINTS = {
     },
     "triton.language.split": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.split",
+        "example":
+        "triton.language.split",
     },
     "triton.language.sqrt": {
         "constraints": [
@@ -1205,9 +1236,7 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64, fp64, \
                 Ascend 950 does not support fp64.",
-            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
-                must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
-            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
         "example":
         "triton.language.store_tensor_descriptor",
@@ -1278,7 +1307,7 @@ CONSTRAINTS = {
     },
     "triton.language.trans": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
             "Transpose on dimensions greater than 8 is not supported.",
         ],
         "example":
@@ -1292,9 +1321,10 @@ CONSTRAINTS = {
     },
     "triton.language.view": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64.",
+            "DataType: Ascend A2/A3 does not support fp64, uint16, uint32, uint64, Ascend 950 does not support fp64.",
         ],
-        "example": "triton.language.view",
+        "example":
+        "triton.language.view",
     },
     "triton.language.where": {
         "constraints": [
@@ -1305,7 +1335,7 @@ CONSTRAINTS = {
     },
     "triton.language.xor_sum": {
         "constraints": [
-            "DataType: Ascend A2/A3 does not support uint16, uint32, uint64; Ascend 950 does not fp8e4(E4M3), fp8e5(E5M2).",
+            "DataType: Ascend A2/A3 does not support uint16, uint32, uint64.",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
         ],
         "example":
