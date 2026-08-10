@@ -189,20 +189,72 @@ def install() -> None:
     _make_module("triton.extension")
     _make_module("triton.extension.buffer")
 
-    class _StubAddressSpace:
+    # ------------------------------------------------------------------ #
+    # triton.extension.buffer.language — populated from real source       #
+    # via AST parsing so docstrings / signatures stay in sync without     #
+    # requiring a working ``import triton`` (no NPU needed).              #
+    # ------------------------------------------------------------------ #
+    _repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    _parse_source_path = os.path.join(_repo_root, "docs", "zh", "python-api", "_parse_source.py")
+    _parse_spec = _ilu.spec_from_file_location("_parse_source", _parse_source_path)
+    _parse_source = _ilu.module_from_spec(_parse_spec)
+    _parse_spec.loader.exec_module(_parse_source)
 
-        def __init__(self, *args, **kwargs):
-            pass
+    _bl_source = os.path.join(_repo_root, "python", "triton", "extension", "buffer", "language", "core.py")
+    _parse_source.install_source_module(
+        [_bl_source],
+        "triton.extension.buffer.language",
+        export_filter=[
+            "address_space",
+            "buffer_type",
+            "buffer",
+            "alloc",
+            "to_buffer",
+            "to_tensor",
+            "subview",
+        ],
+    )
 
-    _bl = types.ModuleType("triton.extension.buffer.language")
-    _bl.__package__ = "triton.extension.buffer.language"
-    _bl.__path__ = []
-    _bl.address_space = _StubAddressSpace
-    sys.modules["triton.extension.buffer.language"] = _bl
-
+    # ------------------------------------------------------------------ #
+    # triton.language.extra                                                #
+    # ------------------------------------------------------------------ #
     _extra = _make_module("triton.language.extra")
     _cann = _make_module("triton.language.extra.cann", parent=_extra)
     _make_module("triton.language.extra.extension", parent=_extra)
+
+    _cann_src = os.path.join(_repo_root, "third_party", "ascend", "language", "cann")
+
+    # --- triton.language.extra.cann.libdevice ---
+    _parse_source.install_source_module(
+        [os.path.join(_cann_src, "libdevice.py")],
+        "triton.language.extra.cann.libdevice",
+    )
+
+    # --- triton.language.extra.cann.extension ---
+    _ext_dir = os.path.join(_cann_src, "extension")
+    _ext_sources = [
+        os.path.join(_ext_dir, f)
+        for f in ["core.py", "scope.py", "custom_op.py", "math_ops.py", "aux_ops.py", "vec_ops.py", "mem_ops.py"]
+    ]
+    _parse_source.install_source_module(
+        _ext_sources,
+        "triton.language.extra.cann.extension",
+    )
+
+    # Add MLIR affine type stubs (C extension bindings; not in .py sources)
+    _cann_ext = sys.modules["triton.language.extra.cann.extension"]
+    _MLIR_STUBS = [
+        "affine_expr",
+        "affine_constant_expr",
+        "affine_dim_expr",
+        "affine_symbol_expr",
+        "affine_binary_op_expr",
+        "affine_map",
+    ]
+    for _name in _MLIR_STUBS:
+        if not hasattr(_cann_ext, _name):
+            _stub_cls = type(_name, (), {"__doc__": f"MLIR {_name} type."})
+            setattr(_cann_ext, _name, _stub_cls)
 
     # ------------------------------------------------------------------ #
     # Optional runtime deps                                               #

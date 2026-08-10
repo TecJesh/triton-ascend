@@ -128,15 +128,24 @@ def _unwrap_jit(fn):
     return wrapper
 
 
-if hasattr(sphinx.ext.autosummary, "get_documenter"):
-    _orig_get_documenter = sphinx.ext.autosummary.get_documenter
+# Sphinx <9 uses "get_documenter"(app, obj, parent);
+# Sphinx 9+ uses "_get_documenter"(obj, parent).
+_doc_fn_name = "_get_documenter" if hasattr(sphinx.ext.autosummary, "_get_documenter") else "get_documenter"
+if hasattr(sphinx.ext.autosummary, _doc_fn_name):
+    _orig_get_documenter = getattr(sphinx.ext.autosummary, _doc_fn_name)
+    import inspect as _inspect
+    _takes_app = "app" in _inspect.signature(_orig_get_documenter).parameters
 
-    def _get_documenter(app, obj, parent):
-        if isinstance(obj, triton.runtime.JITFunction):
-            obj = obj.fn
-        return _orig_get_documenter(app, obj, parent)
+    def _patched_get_documenter(*args, **kwargs):
+        # 'obj' is at index 1 for old Sphinx (app, obj, parent),
+        # at index 0 for Sphinx 9.x (obj, parent).
+        _args = list(args)
+        _obj_idx = 1 if _takes_app else 0
+        if isinstance(_args[_obj_idx], triton.runtime.JITFunction):
+            _args[_obj_idx] = _args[_obj_idx].fn
+        return _orig_get_documenter(*_args, **kwargs)
 
-    sphinx.ext.autosummary.get_documenter = _get_documenter
+    setattr(sphinx.ext.autosummary, _doc_fn_name, _patched_get_documenter)
 
 sphinx.util.inspect.unwrap_all = _unwrap_jit(sphinx.util.inspect.unwrap_all)
 sphinx.util.inspect.signature = _unwrap_jit(sphinx.util.inspect.signature)
