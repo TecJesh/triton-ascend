@@ -28,10 +28,10 @@ triton.language.inline_asm_elementwise(asm, constraints, args, dtype, is_pure, p
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | × | ✓ |
 | Ascend A2/A3 | × | ✓ | × | ✓ | × | ✓ | × | ✓ | × | ✓ | × | × | × | × | × |
-| Ascend 950 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | ✓ | ✓ | ✓ | ✓ |
+| Ascend 950 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | ✓ | × | ✓ | × | × | × | × | × |
 
 结论：Ascend A2/A3 对比 GPU 缺失 uint8、uint16、uint32、uint64、fp16、fp64、bf16、bool 的支持能力。
-Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+Ascend 950 对比 GPU 缺失 uint64、fp16、fp64、bf16、bool 的支持能力。
 
 ### 2.3 使用方法
 
