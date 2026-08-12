@@ -1,4 +1,4 @@
-# mod
+# triton.language.mod
 
 ## 1. OP 概述
 

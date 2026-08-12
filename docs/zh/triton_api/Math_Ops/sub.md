@@ -1,4 +1,4 @@
-# sub
+# triton.language.sub
 
 ## 1. OP 概述
 
