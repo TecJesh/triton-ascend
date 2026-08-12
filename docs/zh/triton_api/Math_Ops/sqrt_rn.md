@@ -33,7 +33,6 @@ triton.language.sqrt_rn(x)
 - Ascend A2/A3/950 对比 GPU 无缺失的数据类型。
 
 
-
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |

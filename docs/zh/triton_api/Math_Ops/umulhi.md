@@ -33,8 +33,6 @@ triton.language.umulhi(x, y)
 结论：
 - Ascend A2/A3/950 对比 GPU 缺失 int64 的支持能力。
 
-torch_npu 对 uint8 的支持。
-
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |

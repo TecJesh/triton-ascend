@@ -1,4 +1,4 @@
-# ne
+# triton.language.semantic.not_equal
 
 ## 1. OP 概述
 

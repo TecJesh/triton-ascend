@@ -7,7 +7,7 @@
 
 
 ```python
-triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_imprecise_acc=None, out_dtype)
+triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_imprecise_acc=None, out_dtype=float32)
 ```
 
 
@@ -17,8 +17,8 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `input`        | `tensor`     |     第一个输入，2D or 3D 张量， 为了避免溢出 取值范围限制为-5-5     |
-| `other`       | `tensor`     |     第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5    |
+| `input`        | `tensor`     |     第一个输入，2-8D 张量， 为了避免溢出 取值范围限制为-5-5     |
+| `other`       | `tensor`     |     第二个输入,  2-8D 张量，为了避免溢出 取值范围限制为-5-5    |
 | `acc`           | `tensor`    | 存累加结果的张量, accumulator tensor. If not None, the result is added to this tensor, acc_dtype支持 {:code:`float16`, :code:`float32`, :code:`int32`} |
 | `input_precision`   | `str` | 控制 f32 x f32 输入的精度模式。支持类型 :`"ieee"` 和 `"hf32"`，默认`"ieee"`。不支持 :`"tf32"`，设置`"tf32"`会转换为`"hf32"`。 |
 | `allow_tf32` | `bool` | 若设为 True，等价于 `input_precision="tf32"`， |
