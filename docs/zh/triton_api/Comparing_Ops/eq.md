@@ -1,4 +1,4 @@
-# eq
+# triton.language.semantic.equal
 
 ## 1. OP 概述
 

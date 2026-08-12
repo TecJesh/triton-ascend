@@ -44,12 +44,12 @@ Atomic_Ops/index.md
 
 |api|简要说明|
 |--|--|
-| [eq](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
+| [equal](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
 | [le](./Comparing_Ops/le.md) | 用于比较两个张量的元素，与`<=`等价。 |
 | [ge](./Comparing_Ops/ge.md) | 用于比较两个张量的元素，与`>=`等价。 |
 | [lt](./Comparing_Ops/lt.md) | 用于比较两个张量的元素，与`<`等价。 |
 | [gt](./Comparing_Ops/gt.md) | 用于比较两个张量的元素，与`>`等价。 |
-| [ne](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
+| [not_equal](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
 
 ```{toctree}
 :maxdepth: 3

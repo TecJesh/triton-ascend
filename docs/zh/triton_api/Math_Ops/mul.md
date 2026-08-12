@@ -1,4 +1,4 @@
-# mul
+# triton.language.mul
 
 ## 1. OP 概述
 
