@@ -22,6 +22,7 @@ import ctypes
 import functools
 import hashlib
 import glob
+import json
 import os
 import re
 import shlex
@@ -33,7 +34,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
 
-from triton._C.libtriton import ir, passes, ascend
+from triton._C.libtriton import ir, passes, ascend, buffer_ir
+from triton._C.libtriton.ascend import ir as ascend_ir
+try:
+    from triton._C.libtriton import distributed
+except ImportError:
+    distributed = None
 from triton.backends.ascend.utils import (
     _check_bishengir_api_change,
     _check_bishengir_able_save_ir,
@@ -57,14 +63,14 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     get_cann_version_file_hash,
+    is_compile_on_910_95,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
     BaseBackend,
     GPUTarget,
 )
-from triton.runtime.cache import _base32, get_dump_manager
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.runtime.cache import get_dump_manager
 
 
 # TODO: materialize the concrete min shape
@@ -118,15 +124,8 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
 
 
 def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
-    """
-    If TRITON_DUMP_DIR is set, return paths under that directory.
-    Otherwise, return the original src_path and dst_path.
-    """
-    dump_dir_env = os.getenv("TRITON_DUMP_DIR")
-    if dump_dir_env:
-        dump_dir = os.path.join(dump_dir_env, _base32(hash_key))
-        return (os.path.join(dump_dir, os.path.basename(src_path)), os.path.join(dump_dir, os.path.basename(dst_path)))
-    return (src_path, dst_path)
+    dump_manager = get_dump_manager(hash_key)
+    return (dump_manager._make_path(os.path.basename(src_path)), dump_manager._make_path(os.path.basename(dst_path)))
 
 
 def make_ttir(mod, metadata, opt):
@@ -136,6 +135,8 @@ def make_ttir(mod, metadata, opt):
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
     passes.common.add_inliner(pm)
+    # passes.ttir.add_rewrite_tensor_pointer(pm)
+    passes.ttir.add_rewrite_tensor_descriptor_to_pointer(pm)
     passes.ttir.add_combine(pm)
     passes.common.add_canonicalizer(pm)
     passes.ttir.add_reorder_broadcast(pm)
@@ -189,6 +190,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
+        if distributed is not None:
+            distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
         # ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
@@ -224,6 +227,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+
+        if _enable_msdebug():
+            ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
         _intra_val = metadata.get("intra_cache_num")
         if _intra_val is not None:
@@ -556,6 +562,12 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--enable-code-motion={code_motion}",
             ]
 
+        enable_preload = metadata["enable_preload"]
+        if enable_preload is not None:
+            _compile_option_list += [
+                f"--enable-preload={enable_preload}",
+            ]
+
         disable_tightly_coupled_buffer_reuse = metadata["disable_tightly_coupled_buffer_reuse"]
         if disable_tightly_coupled_buffer_reuse:
             _compile_option_list += ["--disable-tightly-coupled-buffer-reuse"]
@@ -563,6 +575,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
+        npu_utils = NPUUtils()
+        if npu_utils.has_device_limit():
+            _compile_option_list += [
+                f"--custom-aic-number={npu_utils.get_aicore_num()}",
+            ]
+            _compile_option_list += [
+                f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+            ]
 
         if force_disable_ffts():
             _compile_option_list += ["--disable-ffts"]
@@ -688,6 +708,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
@@ -700,8 +722,18 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if hfusion_enable_multiple_consumer_fusion:
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
+        plan_memory_strategy = metadata["plan_memory_strategy"]
+        if plan_memory_strategy is not None:
+            cmd_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
+
+        enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
+        if enable_cross_if_fusion:
+            cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
+
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -912,17 +944,17 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 "--enable-triton-kernel-compile=true",
             ]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
-            _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
-        if opt.debug:
+
+        if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print_cmd_list = cmd_list.copy()
             print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
-        elif os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -978,7 +1010,7 @@ class NPUOptions:
     auto_blockify_size: int = 1
     add_auto_scheduling: bool = False
     enable_auto_blockify: bool = None
-    compile_on_910_95: bool = is_compile_on_910_95
+    compile_on_910_95: bool = None
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
     enable_warp_specialization: bool = False
@@ -1033,20 +1065,23 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
-    enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
+    enable_dynamic_cv_pipeline: bool = None
     # Gates the cube-loader penetration + cube-for block merge feature. Off by
     # default so existing scenarios are unaffected; opt in per kernel to fuse a
     # matmul's loader for-loop into the matmul's cube compute block.
     enable_cube_block_merge: bool = False
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
-    enable_buffer_insert_optimization: bool = False
+    enable_buffer_insert_optimization: bool = True
     hfusion_enable_multiple_consumer_fusion: bool = False
+    enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
     inter_cache_num: int = None
     load_cache_num: int = None
 
+    # plan memory strategy: "default" (default) or "largest-first"
+    plan_memory_strategy: str = None
     stream: int = None
     parallel_mode: str = "simd"
     force_simt_only: bool = False
@@ -1081,6 +1116,9 @@ class NPUOptions:
     superblock_factor: int = 0
 
     def __post_init__(self):
+        from triton.backends.ascend import _apply_ascend_patch
+
+        _apply_ascend_patch()
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
@@ -1126,8 +1164,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
-            if opt.simt_stack_limit:
-                _compile_option_list += [f"--simt-stack-limit={opt.simt_stack_limit}"]
+            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.enable_simt_reorder_instruction:
@@ -1169,6 +1206,27 @@ def ttir_to_npubin(mod, metadata, opt):
         return Path(bin_path).read_bytes()
 
 
+def get_simt_stack_limit():
+    # simt_stack_limit resolution precedence:
+    #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
+    #    takes precedence and the user-specified value is ignored.
+    #  2.if that config key is absent ,fail back to the kernel-time
+    #    default simt_stack_limit=1152
+    _simt_stack_limit = 1152
+    try:
+        import torch_npu
+        torch_npu_basic_path = os.path.dirname(torch_npu.__file__)
+        _acl_cfg_path = os.path.join(torch_npu_basic_path, "acl_default.json")
+        with open(_acl_cfg_path, "r") as f:
+            _acl_cfg = json.load(f)
+        _cfg_stack = _acl_cfg.get("StackSize", {}).get("simt_stack_size", None)
+        if _cfg_stack is not None and _cfg_stack > 0:
+            _simt_stack_limit = _cfg_stack
+    except Exception as e:
+        print(f"[DEBUG] read acl_default.json failed: {e}")
+    return _simt_stack_limit
+
+
 class AscendBackend(BaseBackend):
 
     @staticmethod
@@ -1188,6 +1246,12 @@ class AscendBackend(BaseBackend):
             args = {k: opts[k] for k in NPUOptions.__dataclass_fields__.keys() if k in opts}
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
+            # Lazy init compile_on_910_95 if not provided
+            if options.compile_on_910_95 is None:
+                object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())
+            # Lazy init enable_dynamic_cv_pipeline if not provided
+            if options.enable_dynamic_cv_pipeline is None:
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
             # Costmodel path should avoid extra BC<->MLIR conversion stages
             # to keep compile-only autotune routing lightweight and stable.
             if getattr(options, "enable_costmodel_backend", False):
@@ -1220,12 +1284,16 @@ class AscendBackend(BaseBackend):
     def get_codegen_implementation(self, options):
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        from triton.backends.ascend import _apply_ascend_patch
-        _apply_ascend_patch()
         codegen_fns = {"min_dot_size": min_dot_size(self.target)}
         return codegen_fns
 
     def load_dialects(self, ctx):
+        from triton._C.libtriton import buffer_ir
+        from triton._C.libtriton.ascend import ir as ascend_ir
+        if distributed is not None:
+            distributed.ir.load_dialects(ctx)
+        buffer_ir.load_dialects(ctx)
+        ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):

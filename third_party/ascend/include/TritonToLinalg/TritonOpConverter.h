@@ -74,9 +74,14 @@ public:
 Convert `tt.fp_to_fp` operation with RTNE (default) rounding mode to
 `arith.truncf` or `arith.extf` operation.
 
-For fp8 conversions with default RTNE rounding:
+For default RTNE rounding:
 - downcast: tt.fp_to_fp -> arith.truncf
 - upcast: tt.fp_to_fp -> arith.extf
+- same-bitwidth conversions between distinct floating-point formats:
+  tt.fp_to_fp -> arith.extf (to f32) -> arith.truncf
+
+Only an operation whose complete input and result MLIR types are identical can
+be eliminated as an identity conversion.
 
 Note: Non-RTNE rounding modes (e.g., RTZ) are handled by TritonToHFusion pass.
 */
@@ -127,6 +132,12 @@ public:
     if (auto linalgOp = op->template getParentOfType<triton::ScanOp>()) {
       return rewriter.notifyMatchFailure(
           op, "ScalarMathCanonicalizer handles op not within tt.scan.");
+    }
+    if (auto linalgOp =
+            op->template getParentOfType<triton::MapElementwiseOp>()) {
+      return rewriter.notifyMatchFailure(
+          op,
+          "ScalarMathCanonicalizer handles op not within tt.map_elementwise.");
     }
     auto loc = op.getLoc();
     llvm::SmallVector<Value> inputs;
@@ -481,6 +492,36 @@ protected:
                             ConversionPatternRewriter &rewriter) const override;
 };
 
+/*
+ * Decompose tt.map_elementwise region body into tensor-level Named Ops.
+ * Each scalar op (arith, math, scf.if, etc.) is promoted to its tensor
+ * counterpart, producing a chain of independent Named Ops.
+ */
+class MapElementwiseDecomposeConverter
+    : public OpConversionPattern<triton::MapElementwiseOp> {
+public:
+  using OpConversionPattern<triton::MapElementwiseOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::MapElementwiseOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  // Promote a single scalar op to tensor-level and record the result in
+  // valueMap.  Returns the tensor result values (one per op result).
+  SmallVector<Value> promoteOp(Operation *op,
+                               llvm::DenseMap<Value, Value> &valueMap,
+                               OpBuilder &builder, Location loc,
+                               ArrayRef<int64_t> tensorShape) const;
+
+  // Promote ops in a region body (excluding terminator), return the yielded
+  // tensor values from the terminator.
+  SmallVector<Value> promoteRegionBody(Region &region,
+                                       llvm::DenseMap<Value, Value> &valueMap,
+                                       OpBuilder &builder, Location loc,
+                                       ArrayRef<int64_t> tensorShape) const;
+};
+
 class ExternElementwiseClOpConverter
     : public OpConversionPattern<triton::ExternElementwiseOp> {
 public:
@@ -650,6 +691,14 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 
   LogicalResult
   matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+struct DotConverter : public OpConversionPattern<triton::ascend::DotOp> {
+  using OpConversionPattern<triton::ascend::DotOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::ascend::DotOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 };
 

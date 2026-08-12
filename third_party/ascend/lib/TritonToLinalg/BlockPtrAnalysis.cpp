@@ -149,7 +149,8 @@ OpFoldResult BlockData::inferBlockOffset(const Location &loc,
                                          OpBuilder &builder) const {
   OpFoldResult retOffset = builder.getIndexAttr(0);
   for (auto ofr : offsets) {
-    retOffset = addOpFoldResult(retOffset, ofr, loc, builder);
+    retOffset =
+        addOpFoldResult(retOffset, ofr, loc, builder, builder.getIndexType());
   }
   return retOffset;
 }
@@ -193,8 +194,9 @@ void BlockData::addBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
   // 2. otherwise, both lhs and rhs are scalar type with rank 0
   // Except above, original `scalar` has been fused into `offset` under add.
   if (lBlock.isScalar() && rBlock.isScalar()) {
-    auto addScalar = addOpFoldResult(lBlock.getScalarRef(),
-                                     rBlock.getScalarRef(), loc, rewriter);
+    auto addScalar =
+        addOpFoldResult(lBlock.getScalarRef(), rBlock.getScalarRef(), loc,
+                        rewriter, rewriter.getIndexType());
     this->scalar = addScalar;
   } else if (lBlock.getRank() == 0) {
     // When both lhs and rhs are scalar type with rank 0, just try passing
@@ -205,12 +207,14 @@ void BlockData::addBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
 
   for (const auto &[lOffset, rOffset] :
        llvm::zip(lBlock.getOffsetsRef(), rBlock.getOffsetsRef())) {
-    this->offsets.push_back(addOpFoldResult(lOffset, rOffset, loc, rewriter));
+    this->offsets.push_back(addOpFoldResult(lOffset, rOffset, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   for (const auto &[lStride, rStride] :
        llvm::zip(lBlock.getStridesRef(), rBlock.getStridesRef())) {
-    this->strides.push_back(addOpFoldResult(lStride, rStride, loc, rewriter));
+    this->strides.push_back(addOpFoldResult(lStride, rStride, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   // Both sizes are same implicitly under `add`
@@ -268,8 +272,8 @@ void BlockData::mulBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
                    << " rBlbock.scalar:" << rBlock.getScalar() << "\n";
     });
 
-    auto scalar =
-        mulOpFoldResult(lBlock.getScalar(), rBlock.getScalar(), loc, rewriter);
+    auto scalar = mulOpFoldResult(lBlock.getScalar(), rBlock.getScalar(), loc,
+                                  rewriter, rewriter.getIndexType());
     this->scalar = scalar;
   }
 
@@ -287,11 +291,13 @@ void BlockData::mulBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
   // In mulBlock, `scalar` will be accumulated into `offset` and `stride`
   OpFoldResult rScalar = rb->getScalarRef();
   for (const auto &lOffset : lb->getOffsetsRef()) {
-    this->offsets.push_back(mulOpFoldResult(lOffset, rScalar, loc, rewriter));
+    this->offsets.push_back(mulOpFoldResult(lOffset, rScalar, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   for (const auto &lStride : lb->getStridesRef()) {
-    this->strides.push_back(mulOpFoldResult(lStride, rScalar, loc, rewriter));
+    this->strides.push_back(mulOpFoldResult(lStride, rScalar, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   this->sizes = lb->getSizesRef();
@@ -1448,7 +1454,7 @@ accumulatePotentialOffsetOnBase(triton::MakeTensorPtrOp op, Value base,
            "base of MakeTensorPtrOp only comes from native ptr or AddPtrOp");
 
     return addOpFoldResult(offset, baseRecast.getConstifiedMixedOffset(),
-                           op.getLoc(), rewriter);
+                           op.getLoc(), rewriter, rewriter.getIndexType());
   }
 
   return offset;
@@ -1618,7 +1624,8 @@ void BlockDataParser::rewriteMakeTensorPtrOp(
   SmallVector<OpFoldResult> newOffsets;
   for (auto [offset, stride] :
        llvm::zip(data.getOffsetsRef(), data.getStridesRef()))
-    newOffsets.push_back(mulOpFoldResult(offset, stride, loc, rewriter));
+    newOffsets.push_back(mulOpFoldResult(offset, stride, loc, rewriter,
+                                         rewriter.getIndexType()));
 
   // 1. Consider that current base ptr may comes from `triton::AddPtrOp`,
   // which have been converted to `memref::ReinterpretCastOp` with 1D
@@ -1786,8 +1793,9 @@ void BlockDataParser::rewriteAdvanceOp(
        llvm::zip(incrementOffsets, blockData.getOffsetsRef(),
                  blockData.getStridesRef())) {
     auto curDimOffset =
-        addOpFoldResult(mulOpFoldResult(increment, stride, loc, rewriter),
-                        originalOffset, loc, rewriter);
+        addOpFoldResult(mulOpFoldResult(increment, stride, loc, rewriter,
+                                        rewriter.getIndexType()),
+                        originalOffset, loc, rewriter, rewriter.getIndexType());
 
     newOffsets.push_back(curDimOffset);
   }
@@ -2592,7 +2600,8 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
             bLoc, bB.getIndexType(), scalarOffsetRaw);
         OpFoldResult baseOffset = bB.getIndexAttr(0);
         for (auto ofr : data.getOffsetsRef()) {
-          baseOffset = addOpFoldResult(baseOffset, ofr, bLoc, bB);
+          baseOffset =
+              addOpFoldResult(baseOffset, ofr, bLoc, bB, bB.getIndexType());
         }
         Value baseVal = getValueOrCreateConstantIndexOp(bB, bLoc, baseOffset);
         Value combinedOffset =

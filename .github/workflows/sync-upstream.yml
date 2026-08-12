@@ -29,6 +29,7 @@ on:
         description: 'Upstream triton commit SHA (leave empty for latest)'
         required: false
         default: ''
+<<<<<<< HEAD
       skip_baseline_llvm:
         description: 'Skip baseline LLVM compilation'
         required: false
@@ -41,6 +42,8 @@ on:
         description: 'Skip end-to-end tests'
         required: false
         default: 'false'
+=======
+>>>>>>> upstream/main
   schedule:
     # Weekly, Monday 03:17 UTC — off the :00 mark on purpose.
     - cron: '17 3 * * 1'
@@ -237,14 +240,22 @@ jobs:
           LLVM_INSTALL_PREFIX_SYNC: ~/llvm-install-sync
           # Enable single-step per-commit merge → build → test → fix pipeline.
           TA_SINGLE_STEP_MODE: "true"
+<<<<<<< HEAD
           # Optional skip flags (configure via workflow_dispatch inputs).
           SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm }}
           SKIP_BUILD: ${{ inputs.skip_build }}
           SKIP_E2E_TEST: ${{ inputs.skip_e2e_test }}
+=======
+>>>>>>> upstream/main
           # Push branch + open PR when everything passes.
           PUSH_TO_GITHUB: "true"
           GITHUB_REPO: triton-lang/triton-ascend
           TA_BASE_BRANCH: upstream-sync
+<<<<<<< HEAD
+=======
+          PR_AUTHOR: TA
+          PR_TYPE: sync
+>>>>>>> upstream/main
           GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           # AI backend: Claude Code CLI wired to DeepSeek's Anthropic-compatible API.
           AI_BACKEND: claude
