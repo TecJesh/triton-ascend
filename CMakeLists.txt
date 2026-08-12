@@ -132,25 +132,6 @@ function(add_triton_library name)
   set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
   add_triton_object(${name} ${ARGN})
   llvm_update_compile_flags(${name})
-<<<<<<< HEAD
-  target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
-
-  # To enable llvm-cov coverage tool, you need to pass the argument TRITON_APPEND_CMAKE_ARGS="-DTRITON_ENABLE_COVERAGE_LLVM_COV=ON" during compilation.
-  if(TRITON_ENABLE_COVERAGE_LLVM_COV)
-    if("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES ".*/third_party/ascend/.*" AND NOT "${CMAKE_CURRENT_SOURCE_DIR}" MATCHES ".*/AscendNPU-IR/.*")
-      message(STATUS "Enabling coverage for target ${name} (in Ascend plugin)")
-      target_compile_options(${name} PRIVATE
-        -fprofile-arcs
-        -ftest-coverage
-        -O0
-        -fprofile-update=atomic
-        -g
-      )
-      target_link_options(${name} PUBLIC --coverage)
-    endif()
-  endif()
-=======
->>>>>>> upstream/main
 endfunction()
 
 set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
@@ -187,28 +168,6 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
   link_libraries(stdc++fs)
 endif()
 
-<<<<<<< HEAD
-# Adapter LLVM VERSION For AscendNPU IR
-option(LLVM_MAJOR_VERSION_21_COMPATIBLE "NPUIR build with LLVM 21 or later" OFF)
-if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
-  message(STATUS "[TA]Building AscendNPU IR with LLVM 21 or later")
-  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
-endif()
-
-# Some compatibility changes for LLVM 21 are also needed on LLVM 22.
-# Therefore __LLVM_MAJOR_VERSION_21_COMPATIBLE__ would be enabled too.
-option(LLVM_MAJOR_VERSION_22_COMPATIBLE "NPUIR build with LLVM 22" OFF)
-if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
-  message(STATUS "[TA]Building AscendNPU IR with LLVM 22 or later")
-  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
-  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
-  # LLVM 22 deprecates OpBuilder::create<T>() in favor of T::create().
-  # Suppress deprecation warnings that -Werror would treat as errors
-  # across all Ascend backend code (AscendNPU-IR, TritonToLinalg, etc.).
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
-endif()
-=======
->>>>>>> upstream/main
 
 # -----
 
