@@ -57,7 +57,8 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 2、输入矩阵lhs、rhs推荐输入范围为[-5, 5]，超过可能会出现极值inf。
 3、由于硬件存在对齐要求，需要限制scale矩阵做broadcast的倍数，至少应为16
 
-4、当前支持的缩放矩阵格式为int8，社区为uint8
+4、当前支持的缩放矩阵格式为uint8/int8
+5、Scale应该是32的倍数
 
 ### 2.4 使用方法
 
