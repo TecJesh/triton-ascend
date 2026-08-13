@@ -33,7 +33,7 @@ triton.language.sort(x, dim: constexpr = None, descending: constexpr = False)
 
 结论：
 - Ascend A2/A3 对比 GPU 缺失 uint8、int32、int64、fp64、bool 的支持能力。
-- Ascend 950 对比 GPU 缺失 uint8、fp64、bool 的支持能力。
+- Ascend 950 对比 GPU 缺失 uint8、fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 
