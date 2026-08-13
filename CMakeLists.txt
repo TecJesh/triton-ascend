@@ -131,7 +131,7 @@ set_property(GLOBAL PROPERTY TRITON_LIBS "")
 function(add_triton_library name)
   set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
   add_triton_object(${name} ${ARGN})
-  llvm_update_compile_flags(${name})
+  target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 endfunction()
 
 set_property(GLOBAL PROPERTY TRITON_PLUGINS "")

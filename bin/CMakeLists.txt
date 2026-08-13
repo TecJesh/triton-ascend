@@ -1,6 +1,6 @@
 get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
 
-add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
+add_executable(triton-opt triton-opt.cpp)
 
 target_compile_options(triton-opt PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-opt PRIVATE

@@ -1232,10 +1232,6 @@ def _implicit_cvt(arg):
     return arg
 
 
-interpreter_builder = InterpreterBuilder()
-interpreter_semantic = TritonSemantic(interpreter_builder)
-
-
 def _unwrap_tensor(t):
     if isinstance(t, triton.runtime.jit.TensorWrapper):
         return t.base
