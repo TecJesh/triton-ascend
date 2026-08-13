@@ -1033,8 +1033,8 @@ def checkout_file(files):
 
 def apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
-    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
-    patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
+    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
+    patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
     patch_files = [
         "CMakeLists.txt",
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
