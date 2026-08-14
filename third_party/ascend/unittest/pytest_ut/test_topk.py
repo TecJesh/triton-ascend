@@ -29,7 +29,6 @@ import torch_npu
 import test_common
 
 
-@pytest.mark.skip(reason="Blocks in main2main subprocess, skip temporarily")
 @pytest.mark.interpreter
 @pytest.mark.parametrize("shape", [
     (16, 64),

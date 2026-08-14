@@ -1309,15 +1309,10 @@ def acos(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
-        if arg0.dtype == core.dtype("bf16"):
-            core.static_print("extern livdevice.acos for dtype bf16 is unspported for now.")
-            core.static_assert(False)
-        return core.extern_elementwise(
-            "", "", [arg0], {
-                (core.dtype("fp16"), ): ("__hmf_acos_fp16", core.dtype("fp16")),
-                (core.dtype("fp32"), ): ("__hmf_acos_fp32", core.dtype("fp32")),
-            }, is_pure=True, _semantic=_semantic)
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_acos_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
     else:
         pi = 3.1415926536
         pi_half = 1.5707963268
@@ -1542,12 +1537,10 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The direction value tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
-        return core.extern_elementwise(
-            "", "", [arg0, arg1], {
-                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_nextafter_fp16", core.dtype("fp16")),
-                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
-            }, is_pure=True, _semantic=_semantic)
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
     else:
         x = _semantic.to_tensor(arg0)
         y = _semantic.to_tensor(arg1)
@@ -2699,12 +2692,12 @@ def rsqrt(arg0, _semantic=None):
 
 @core.extern
 def sin(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.sin for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    return core.tensor(_semantic.builder.create_sin(arg0.handle), arg0.type)
 
 
 @core.extern
