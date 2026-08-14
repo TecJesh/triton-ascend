@@ -650,24 +650,6 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=cmake_dir)
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
 
-        # Copy triton-mlir-opt tool to extdir for runtime use
-        # This tool is needed for converting MLIR to Bytecode
-        triton_mlir_opt_src = os.path.join(cmake_dir, "third_party", "ascend", "bin", "triton-mlir-opt")
-        if os.path.exists(triton_mlir_opt_src):
-            triton_mlir_opt_dst = os.path.join(extdir, "triton-mlir-opt")
-            shutil.copy2(triton_mlir_opt_src, triton_mlir_opt_dst)
-            # Make it executable (Unix-like systems)
-            if platform.system() != "Windows":
-                os.chmod(triton_mlir_opt_dst, 0o755)
-                # Strip debug symbols to reduce binary size (can reduce size by ~80%)
-                try:
-                    subprocess.check_call(["strip", "--strip-all", triton_mlir_opt_dst])
-                    print(f"Stripped triton-mlir-opt to reduce size")
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    # strip command not available or failed, continue without stripping
-                    pass
-            print(f"Copied triton-mlir-opt to {triton_mlir_opt_dst}")
-
         # Copy triton-opt tool to extdir for runtime use
         # This tool is needed for converting ttir to ttadapter
         triton_opt_src = os.path.join(cmake_dir, "bin", "triton-opt")
