@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 43e33fb..26e3271 100644
+index 43e33fb..llvm23 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -15,15 +15,24 @@ include(CTest)
+@@ -15,14 +15,23 @@
  
  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
  
@@ -18,16 +18,15 @@ index 43e33fb..26e3271 100644
  option(LLVM_BUILD_SHARED_LIBS
    "Build all libraries as shared libraries instead of static" OFF)
  set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
- 
++
 +if(TRITON_BUILD_DISTRIBUTED)
 +  set(TRITON_USE_ASCEND ON)
 +  add_compile_definitions(TRITON_USE_ASCEND=1)
 +endif()
-+
+ 
  if(TRITON_BUILD_WITH_CCACHE)
    find_program(CCACHE_PROGRAM ccache)
-   if(CCACHE_PROGRAM)
-@@ -132,6 +141,21 @@ function(add_triton_library name)
+@@ -132,6 +141,21 @@
    set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
    add_triton_object(${name} ${ARGN})
    target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
@@ -49,7 +48,16 @@ index 43e33fb..26e3271 100644
  endfunction()
  
  set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
-@@ -168,6 +192,21 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
+@@ -144,7 +168,7 @@
+ # Disable warnings that show up in external code (gtest;pybind11)
+ if(NOT MSVC)
+   set(TRITON_DISABLE_EH_RTTI_FLAGS "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
++  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -Wno-deprecated-declarations -fvisibility=hidden")
+ else()
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
+ endif()
+@@ -168,6 +192,32 @@
    link_libraries(stdc++fs)
  endif()
  
@@ -68,10 +76,21 @@ index 43e33fb..26e3271 100644
 +  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
 +  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
 +endif()
++
++# LLVM 23 adaptations (Triton Ascend 3.7). Enables 21/22 macros as well.
++option(LLVM_MAJOR_VERSION_23_COMPATIBLE "NPUIR build with LLVM 23 or later" OFF)
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  message(STATUS "[TA]Building AscendNPU IR with LLVM 23 or later")
++  set(LLVM_MAJOR_VERSION_21_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_22_COMPATIBLE ON)
++  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++endif()
  
  # -----
  
-@@ -180,11 +219,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
+@@ -180,10 +230,20 @@
    # Python Interpreter is used to run lit tests
    find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
    find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
@@ -85,15 +104,14 @@ index 43e33fb..26e3271 100644
    foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
      add_subdirectory(third_party/${CODEGEN_BACKEND})
    endforeach()
- 
++
 +  if(TRITON_BUILD_DISTRIBUTED)
 +    list(APPEND TRITON_PLUGIN_NAMES "distributed")
 +  endif()
-+
+ 
    if (TRITON_BUILD_PROTON)
      add_subdirectory(third_party/proton)
-   endif()
-@@ -343,6 +392,12 @@ endif()
+@@ -343,6 +403,12 @@
  find_package(Threads REQUIRED)
  
  add_subdirectory(third_party/f2reduce)
