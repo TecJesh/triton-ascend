@@ -568,7 +568,7 @@ class CMakeBuild(build_ext):
             "-DPython3_EXECUTABLE:FILEPATH=" + sys.executable, "-DPython3_INCLUDE_DIR=" + python_include_dir,
             "-DTRITON_CODEGEN_BACKENDS=" + ';'.join([b.name for b in backends if not b.is_external]),
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
-            "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
+            "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_23_COMPATIBLE=ON"
         ]
         if lit_dir is not None:
             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
@@ -1015,20 +1015,45 @@ def get_git_version_suffix():
         return get_git_commit_hash()
 
 
-def apply_patch(patch_path):
+def apply_patch(patch_path, *, directory=None):
+    cmd = ["git", "apply"]
+    if directory:
+        cmd.extend(["--directory", directory])
+    cmd.append(patch_path)
     try:
-        subprocess.run(["git", "apply", patch_path], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         raise RuntimeError(f"patch({patch_path}) failed")
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
 
 
-def checkout_file(files):
+def checkout_file(files, *, cwd=None):
     try:
-        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=cwd)
     except subprocess.CalledProcessError:
         raise RuntimeError(f"init code failed,list:{files}")
+
+
+def apply_npuir_patch():
+    """Apply AscendNPU-IR adaptations for LLVM 23 (Triton Ascend 3.7)."""
+    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    npuir_dir = os.path.join("third_party", "ascend", "AscendNPU-IR")
+    if not os.path.isfile(patch_path):
+        raise RuntimeError(f"patch({patch_path}) not found.")
+    if not os.path.isdir(npuir_dir):
+        raise RuntimeError(f"AscendNPU-IR not found at {npuir_dir}")
+    npuir_patch_files = [
+        "CMakeLists.txt",
+        "bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td",
+        "bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt",
+        "bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td",
+        "bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt",
+        "bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp",
+        "bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp",
+    ]
+    checkout_file(npuir_patch_files, cwd=npuir_dir)
+    apply_patch(patch_path, directory=npuir_dir)
 
 
 def apply_triton_ascend_patch():
@@ -1060,6 +1085,7 @@ def apply_triton_ascend_patch():
     apply_patch(dev_patch)
     checkout_file(patch_files)
     apply_patch(patch)
+    apply_npuir_patch()
 
 
 def get_triton_version_suffix():
