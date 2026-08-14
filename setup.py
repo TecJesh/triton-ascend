@@ -1031,6 +1031,8 @@ def apply_npuir_patch():
         "bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt",
         "bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td",
         "bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt",
+        "bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td",
+        "bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt",
         "bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp",
         "bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp",
     ]

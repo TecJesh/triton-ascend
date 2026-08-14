@@ -177,11 +177,65 @@ index ffb66a4fa..886a02f0f 100644
        return mlir::hivm::detail::getFlattenedElementwise(*this, options);
      }
      SmallVector<int64_t> getLimitedAxes() {
+diff --git a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
+index e01fb87be..98f8c14f3 100644
+--- a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
++++ b/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
+@@ -1,8 +1,19 @@
++set(tblgen_feat_list)
++if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++endif()
++
+ set(LLVM_TARGET_DEFINITIONS ScopeOps.td)
+-mlir_tablegen(ScopeDialect.h.inc -gen-dialect-decls -dialect=scope)
+-mlir_tablegen(ScopeDialect.cpp.inc -gen-dialect-defs -dialect=scope)
+-mlir_tablegen(ScopeOps.h.inc -gen-op-decls)
+-mlir_tablegen(ScopeOps.cpp.inc -gen-op-defs)
++mlir_tablegen(ScopeDialect.h.inc -gen-dialect-decls -dialect=scope ${tblgen_feat_list})
++mlir_tablegen(ScopeDialect.cpp.inc -gen-dialect-defs -dialect=scope ${tblgen_feat_list})
++mlir_tablegen(ScopeOps.h.inc -gen-op-decls ${tblgen_feat_list})
++mlir_tablegen(ScopeOps.cpp.inc -gen-op-defs ${tblgen_feat_list})
+ add_public_tablegen_target(BiShengIRScopeIncGen)
+ 
+ add_bishengir_doc(ScopeOps ScopeDialect Dialects/ -gen-dialect-doc -dialect=scope)
+diff --git a/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td b/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
+index 14063506d..f83416d88 100644
+--- a/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
++++ b/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
+@@ -31,10 +31,18 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
+ // Scope Dialect operations.
+ //===----------------------------------------------------------------------===//
+ 
+-def ScopeOp : Scope_Op<"scope", [
+-    DeclareOpInterfaceMethods<RegionBranchOpInterface, [
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++defvar ScopeRegionBranchMethods = [
++    "getNumRegionInvocations", "getRegionInvocationBounds",
++    "getEntrySuccessorRegions", "getSuccessorInputs"];
++#else
++defvar ScopeRegionBranchMethods = [
+     "getNumRegionInvocations", "getRegionInvocationBounds",
+-    "getEntrySuccessorRegions"]>,
++    "getEntrySuccessorRegions"];
++#endif
++
++def ScopeOp : Scope_Op<"scope", [
++    DeclareOpInterfaceMethods<RegionBranchOpInterface, ScopeRegionBranchMethods>,
+     NoRegionArguments,
+     SingleBlockImplicitTerminator<"scope::ReturnOp">,
+     SingleBlock,
 diff --git a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
-index da5a9b5d3..99eb19a68 100644
+index da5a9b5d3..f6d774eec 100644
 --- a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 +++ b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
-@@ -68,7 +68,11 @@ void ScopeOp::print(OpAsmPrinter &p) {
+@@ -68,13 +68,25 @@ void ScopeOp::print(OpAsmPrinter &p) {
  void ScopeOp::getSuccessorRegions(RegionBranchPoint point,
                                    SmallVectorImpl<RegionSuccessor> &regions) {
    if (!point.isParent()) {
@@ -193,6 +247,20 @@ index da5a9b5d3..99eb19a68 100644
      return;
    }
  
+   regions.push_back(RegionSuccessor(&getRegion()));
+ }
+ 
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++ValueRange ScopeOp::getSuccessorInputs(RegionSuccessor successor) {
++  // LLVM 23: RegionSuccessor::parent() no longer carries results; report them
++  // here so scope.return operands match the parent successor inputs.
++  return successor.isParent() ? getResults() : ValueRange();
++}
++#endif
++
+ void ScopeOp::getEntrySuccessorRegions(
+     ArrayRef<Attribute> operands, SmallVectorImpl<RegionSuccessor> &regions) {
+   // Scope always enters its region (no operands flow in due to NoRegionArguments trait)
 diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
 index b3f5cf9a2..5afeb482c 100644
 --- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
