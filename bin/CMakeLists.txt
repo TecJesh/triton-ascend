@@ -1,34 +1,10 @@
 get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
 
-include_directories(
-    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
-    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
-  )
-
-add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
+add_executable(triton-opt triton-opt.cpp)
 
 target_compile_options(triton-opt PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-opt PRIVATE
   ${triton_libs}
-  # Ascend backend libraries
-  DiscreteMaskAccessConversion
-  TritonToAnnotation
-  TritonToHFusion
-  TritonToHIVM
-  TritonToLinalg
-  TritonToLLVM
-  TritonToStructured
-  TritonToUnstructure
-  # BiShengIR dialects
-  BiShengIRAnnotationDialect
-  BiShengIRHACCDialect
-  BiShengIRHFusionDialect
-  BiShengIRHIVMDialect
-  BiShengIRMathExtDialect
-  BiShengIRMemRefExtDialect
-  BiShengIRScopeDialect
-  BiShengIRSymbolDialect
-  BiShengIRTensorDialect
   # tests
   TritonTestAnalysis
   TritonTestDialect
@@ -50,25 +26,6 @@ target_compile_options(triton-reduce PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 
 target_link_libraries(triton-reduce PRIVATE
   ${triton_libs}
-  # Ascend backend libraries
-  DiscreteMaskAccessConversion
-  TritonToAnnotation
-  TritonToHFusion
-  TritonToHIVM
-  TritonToLinalg
-  TritonToLLVM
-  TritonToStructured
-  TritonToUnstructure
-  # BiShengIR dialects
-  BiShengIRAnnotationDialect
-  BiShengIRHACCDialect
-  BiShengIRHFusionDialect
-  BiShengIRHIVMDialect
-  BiShengIRMathExtDialect
-  BiShengIRMemRefExtDialect
-  BiShengIRScopeDialect
-  BiShengIRSymbolDialect
-  BiShengIRTensorDialect
   # tests
   TritonTestAnalysis
   TritonTestDialect
@@ -89,25 +46,6 @@ add_executable(triton-lsp triton-lsp.cpp)
 target_compile_options(triton-lsp PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-lsp PRIVATE
   ${triton_libs}
-  # Ascend backend libraries
-  DiscreteMaskAccessConversion
-  TritonToAnnotation
-  TritonToHFusion
-  TritonToHIVM
-  TritonToLinalg
-  TritonToLLVM
-  TritonToStructured
-  TritonToUnstructure
-  # BiShengIR dialects
-  BiShengIRAnnotationDialect
-  BiShengIRHACCDialect
-  BiShengIRHFusionDialect
-  BiShengIRHIVMDialect
-  BiShengIRMathExtDialect
-  BiShengIRMemRefExtDialect
-  BiShengIRScopeDialect
-  BiShengIRSymbolDialect
-  BiShengIRTensorDialect
   # tests
   TritonTestAnalysis
   TritonTestDialect
@@ -143,26 +81,6 @@ add_executable(triton-tensor-layout triton-tensor-layout.cpp)
 target_compile_options(triton-tensor-layout PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 target_link_libraries(triton-tensor-layout PRIVATE
   ${triton_libs}
-  # Ascend backend libraries
-  DiscreteMaskAccessConversion
-  TritonToAnnotation
-  TritonToHFusion
-  TritonToHIVM
-  TritonToLinalg
-  TritonToLLVM
-  TritonToStructured
-  TritonToUnstructure
-  # BiShengIR dialects
-  BiShengIRAnnotationDialect
-  BiShengIRHACCDialect
-  BiShengIRHFusionDialect
-  BiShengIRHIVMDialect
-  BiShengIRMathExtDialect
-  BiShengIRMemRefExtDialect
-  BiShengIRScopeDialect
-  BiShengIRSymbolDialect
-  BiShengIRTensorDialect
-  # tests
   TritonTestAnalysis
   TritonTestDialect
   TritonTestProton
@@ -171,29 +89,3 @@ target_link_libraries(triton-tensor-layout PRIVATE
   MLIRRegisterAllPasses
   MLIRTransforms
   )
-
-# triton-mlir-opt: Triton-Ascend optimizer combining MLIR and BishengIR dialects
-add_llvm_executable(triton-mlir-opt triton-mlir-opt.cpp PARTIAL_SOURCES_INTENDED)
-llvm_update_compile_flags(triton-mlir-opt)
-
-target_link_libraries(triton-mlir-opt PRIVATE
-  ${triton_libs}
-  # MLIR core
-  MLIROptLib
-  MLIRPass
-  MLIRRegisterAllDialects
-  MLIRRegisterAllPasses
-  MLIRTransforms
-  # Core BishengIR dialect libraries
-  BiShengIRAnnotationDialect
-  BiShengIRHACCDialect
-  BiShengIRHFusionDialect
-  BiShengIRHIVMDialect
-  BiShengIRMathExtDialect
-  BiShengIRMemRefExtDialect
-  BiShengIRScopeDialect
-  BiShengIRSymbolDialect
-  BiShengIRTensorDialect
-)
-
-mlir_check_all_link_libraries(triton-mlir-opt)
