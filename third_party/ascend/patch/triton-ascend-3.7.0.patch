@@ -128,10 +128,11 @@ diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
 index 885cffb..42e545e 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
-@@ -1,10 +1,34 @@
+@@ -1,10 +1,35 @@
  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
  
 +include_directories(
++    ${PROJECT_SOURCE_DIR}/third_party/ascend/include
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +  )

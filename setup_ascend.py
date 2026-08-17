@@ -103,8 +103,8 @@ def _apply_patch(patch_path, *, directory=None, cwd=None):
 
 def _checkout_file(files, *, cwd=None):
     try:
-        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL,
-                       cwd=str(cwd or _THIS_DIR))
+        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd
+                                                                                                         or _THIS_DIR))
     except subprocess.CalledProcessError:
         raise RuntimeError(f"init code failed, list:{files}")
 
