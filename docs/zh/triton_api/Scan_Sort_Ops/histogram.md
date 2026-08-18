@@ -25,7 +25,7 @@ triton.language.histogram(input, num_bins, mask=None)
 
 返回值：
 用tensor表示的直方图
-注：input输入范围限制在[0,num_bins-1]中，待版本更新后支持全范围
+注：当前triton3.2版本暂未支持mask，待版本更新后支持；input输入范围限制在[0,num_bins-1]中，待版本更新后支持全范围
 
 ### 2.2 支持规格
 
