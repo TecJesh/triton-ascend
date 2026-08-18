@@ -1535,7 +1535,7 @@ diff --git a/mlir/lib/IR/AsmPrinter.cpp b/mlir/lib/IR/AsmPrinter.cpp
 index 3d19c5ad8fbc..a72b51ad0d9d 100644
 --- a/mlir/lib/IR/AsmPrinter.cpp
 +++ b/mlir/lib/IR/AsmPrinter.cpp
-@@ -3733,9 +3733,15 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
+@@ -3733,9 +3733,17 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
  
    // Print the properties.
    if (Attribute prop = op->getPropertiesAsAttribute()) {
@@ -1548,9 +1548,11 @@ index 3d19c5ad8fbc..a72b51ad0d9d 100644
 +      if (attr.getName() != "op_bundle_sizes")
 +        filtered.push_back(attr);
 +    }
-+    // os << " <";
-+    // Impl::printAttribute(DictionaryAttr::get(op->getContext(), filtered));
-+    // os << '>';
++    if (!filtered.empty()) {
++      os << " <";
++      Impl::printAttribute(DictionaryAttr::get(op->getContext(), filtered));
++      os << '>';
++    }
    }
  
    // Print regions.
