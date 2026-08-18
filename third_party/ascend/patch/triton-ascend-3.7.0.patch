@@ -990,7 +990,7 @@ index 57c22b0d71..b99cd89414 100644
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index e68576b7be..55f0cd0163 100644
+index e68576b7be..7b215d0caf 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -23,6 +23,25 @@ from .._utils import _tuple_create
@@ -1080,21 +1080,7 @@ index e68576b7be..55f0cd0163 100644
      def create_assume(self, condition):
          assert condition, "Assume failed"
  
-@@ -833,7 +866,12 @@ class InterpreterBuilder:
- 
- 
- _MISSING = object()
--interpreter_builder = InterpreterBuilder()
-+# Use AscendInterpreterBuilder if available, otherwise fall back to base InterpreterBuilder
-+_try_import_ascend()
-+if _has_ascend_support and AscendInterpreterBuilder is not None:
-+    interpreter_builder = AscendInterpreterBuilder()
-+else:
-+    interpreter_builder = InterpreterBuilder()
- interpreter_semantic: TritonSemantic = TritonSemantic(interpreter_builder)
- 
- 
-@@ -1195,6 +1233,11 @@ def _patch_lang(fn):
+@@ -1195,6 +1228,11 @@ def _patch_lang(fn):
          _patch_lang_tensor(lang.tensor, scope)
          _patch_lang_core(lang, scope)
      _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
@@ -1106,7 +1092,24 @@ index e68576b7be..55f0cd0163 100644
      return scope
  
  
-@@ -1342,11 +1385,14 @@ class GridExecutor:
+@@ -1232,6 +1270,16 @@ def _implicit_cvt(arg):
+     return arg
+ 
+ 
++# Use AscendInterpreterBuilder if available, otherwise fall back to base InterpreterBuilder.
++# Must run after _LangPatchScope is defined: ascend_interpreter imports it at module load.
++_try_import_ascend()
++if _has_ascend_support and AscendInterpreterBuilder is not None:
++    interpreter_builder = AscendInterpreterBuilder()
++else:
++    interpreter_builder = InterpreterBuilder()
++interpreter_semantic = TritonSemantic(interpreter_builder)
++
++
+ def _unwrap_tensor(t):
+     if isinstance(t, triton.runtime.jit.TensorWrapper):
+         return t.base
+@@ -1342,11 +1390,14 @@ class GridExecutor:
              grid = grid + (1, ) * (3 - len(grid))
              interpreter_builder.set_grid_dim(*grid)
              try:
