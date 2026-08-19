@@ -136,6 +136,7 @@ struct GluonLayouts {
   py::handle AMDMFMALayout;
   py::handle AMDWMMALayout;
   py::handle PaddedSharedLayout;
+  py::handle PartitionedSharedLayout;
 
   GluonLayouts() {
     auto layouts =
@@ -166,6 +167,10 @@ struct GluonLayouts {
     AMDWMMALayout = py::object(amdLayouts.attr("AMDWMMALayout")).release();
     PaddedSharedLayout =
         py::object(layouts.attr("PaddedSharedLayout")).release();
+    auto gfx1250Layouts = py::module::import(
+        "triton.experimental.gluon.language.amd.gfx1250._layouts");
+    PartitionedSharedLayout =
+        py::object(gfx1250Layouts.attr("PartitionedSharedLayout")).release();
 
     auto core = py::module::import("triton.language.core");
   }
@@ -280,6 +285,13 @@ py::object layoutToGluon(Attribute layout) {
     return layouts.PaddedSharedLayout(intervalPaddingPairs,
                                       ll.getBases().lookup(kOffset),
                                       ll.getBases().lookup(kBlock), shape);
+  } else if (auto partitioned =
+                 dyn_cast<ttg::PartitionedSharedEncodingAttr>(layout)) {
+    py::object partitionLayout =
+        layoutToGluon(partitioned.getPartitionLayout());
+    return layouts.PartitionedSharedLayout(
+        partitioned.getNumPartitions(), partitioned.getNumGroups(),
+        partitioned.getPartitionDim(), partitionLayout);
   } else if (auto tmemScales =
                  dyn_cast<ttng::TensorMemoryScalesEncodingAttr>(layout)) {
     return layouts.TensorMemoryScalesLayout(std::vector<unsigned>{
@@ -534,6 +546,15 @@ void init_gluon_ir(py::module &&m) {
              return self.getChecked<ttg::SwizzledSharedEncodingAttr>(
                  ctx, vec, perPhase, maxPhase, order, cgaLayout);
            })
+      .def("get_partitioned_shared_layout",
+           [](GluonOpBuilder &self, unsigned numPartitions, unsigned numGroups,
+              unsigned partitionDim, Attribute partitionLayout) -> Attribute {
+             auto ctx = self.getContext();
+             auto sharedLayout =
+                 cast<ttg::SharedEncodingTrait>(partitionLayout);
+             return self.getChecked<ttg::PartitionedSharedEncodingAttr>(
+                 ctx, numPartitions, numGroups, partitionDim, sharedLayout);
+           })
       .def("get_tensor_memory_layout",
            [](GluonOpBuilder &self, std::vector<unsigned> &block,
               unsigned colStride, std::vector<unsigned> &ctaSplitNum,
@@ -577,6 +598,15 @@ void init_gluon_ir(py::module &&m) {
              auto blockTy = cast<RankedTensorType>(blockType);
              auto blockTyLayout = blockTy.cloneWithEncoding(layout);
              return triton::TensorDescType::get(ctx, blockTyLayout, isSigned);
+           })
+      .def("get_tensor_descriptor_im2col_layout_type",
+           [](GluonOpBuilder &self, Type blockType, bool isSigned,
+              Attribute layout) -> Type {
+             auto ctx = self.getContext();
+             auto blockTy = cast<RankedTensorType>(blockType);
+             auto blockTyLayout = blockTy.cloneWithEncoding(layout);
+             return triton::nvidia_gpu::TensorDescIm2ColType::get(
+                 ctx, blockTyLayout);
            })
       .def("is_convert_layout_trivial",
            [](GluonOpBuilder &self, Type resultTy, Value value) -> bool {
@@ -884,9 +914,13 @@ void init_gluon_ir(py::module &&m) {
 
       .def("create_async_tma_copy_global_to_local",
            [](GluonOpBuilder &self, Value descPtr, std::vector<Value> &coord,
-              Value barrier, Value result, Value pred, bool multicast) {
+              Value barrier, Value result, Value pred, bool multicast,
+              std::optional<std::vector<Value>> offsets) {
+             ValueRange offsetsRange =
+                 offsets.has_value() ? ValueRange(*offsets) : ValueRange{};
              self.create<ttng::AsyncTMACopyGlobalToLocalOp>(
-                 descPtr, coord, barrier, result, pred, multicast);
+                 descPtr, coord, offsetsRange, barrier, result, pred,
+                 multicast);
            })
       .def("create_async_tma_copy_local_to_global",
            [](GluonOpBuilder &self, Value descPtr, std::vector<Value> &coord,

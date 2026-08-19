@@ -163,6 +163,9 @@ class buffer(tl.base_value):
         self.space = buffer_ty.space
         self.strides = buffer_ty.strides
 
+    def _set_name(self, builder: ir.builder, name: str) -> None:
+        self.handle.set_loc(builder.create_name_loc(name, self.handle.get_loc()))
+
     def _flatten_ir(self, handles: List[ir.value]) -> None:
         handles.append(self.handle)
 

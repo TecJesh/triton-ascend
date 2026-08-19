@@ -252,18 +252,30 @@ CGAEncodingAttr getCGALayout(Attribute layout) {
 }
 
 SmallVector<unsigned> getCTAsPerCGA(Attribute layout) {
-  if (auto ttgLayout = mlir::dyn_cast<LayoutEncodingTrait>(layout))
+  // A generic linear encoding may not have a CGA layout
+  // as having a CGA layout implies being of the form cta_layout * cga_layout
+  if (auto linearLayout = mlir::dyn_cast<LinearEncodingAttr>(layout)) {
+    return linearLayout.basesPerDim(
+        StringAttr::get(layout.getContext(), "block"), /*skipBroadcast=*/false);
+  } else if (auto ttgLayout = mlir::dyn_cast<LayoutEncodingTrait>(layout)) {
     return ttgLayout.getCGALayout().getCTAsPerCGA();
+  }
   llvm::report_fatal_error("Unimplemented usage of getCTAsPerCGA");
 }
 
 SmallVector<unsigned> getCTASplitNum(Attribute layout) {
-  SmallVector<unsigned> res;
-  if (auto ttgLayout = mlir::dyn_cast<LayoutEncodingTrait>(layout)) {
+  // A generic linear encoding may not have a CGA layout
+  // as having a CGA layout implies being of the form cta_layout * cga_layout
+  if (auto linearLayout = mlir::dyn_cast<LinearEncodingAttr>(layout)) {
+    return linearLayout.basesPerDim(
+        StringAttr::get(layout.getContext(), "block"));
+  } else if (auto ttgLayout = mlir::dyn_cast<LayoutEncodingTrait>(layout)) {
     return ttgLayout.getCGALayout().getCTASplitNum();
-  } else if (auto tmemLayout =
-                 mlir::dyn_cast<triton::nvidia_gpu::TensorMemoryEncodingAttr>(
-                     layout)) {
+  }
+  SmallVector<unsigned> res;
+  if (auto tmemLayout =
+          mlir::dyn_cast<triton::nvidia_gpu::TensorMemoryEncodingAttr>(
+              layout)) {
     res.resize(2);
     res[0] = tmemLayout.getCTASplitM();
     res[1] = tmemLayout.getCTASplitN();
@@ -1903,10 +1915,10 @@ LogicalResult PartitionedSharedEncodingAttr::verify(
     function_ref<InFlightDiagnostic()> emitError, unsigned numPartitions,
     unsigned numGroups, unsigned partitionDim,
     SharedEncodingTrait partitionLayout) {
-  // Check numPartitions is a power of 2 and > 0
-  if (numPartitions == 0 || !llvm::isPowerOf2_32(numPartitions))
-    return emitError()
-           << "numPartitions must be a power of 2 and greater than 0";
+  // Check numPartitions is a power of 2 and >= 2
+  // (numPartitions == 1 is just the inner layout, use that directly instead)
+  if (numPartitions < 2 || !llvm::isPowerOf2_32(numPartitions))
+    return emitError() << "numPartitions must be a power of 2 and at least 2";
 
   // Check numGroups is a power of 2 and > 0
   if (numGroups == 0 || !llvm::isPowerOf2_32(numGroups))
@@ -4338,4 +4350,22 @@ std::optional<int> triton::gpu::getWarpSpecializeTag(Operation *op) {
     return cast<IntegerAttr>(op->getAttr(kWarpSpecializeTagAttrName)).getInt();
   }
   return std::nullopt;
+}
+
+PaddedSharedEncodingAttr triton::gpu::getPaddedEncoding(Attribute encoding) {
+  if (auto padded = dyn_cast<PaddedSharedEncodingAttr>(encoding))
+    return padded;
+  if (auto partitioned = dyn_cast<PartitionedSharedEncodingAttr>(encoding))
+    return dyn_cast<PaddedSharedEncodingAttr>(partitioned.getPartitionLayout());
+  return nullptr;
+}
+
+bool triton::gpu::isPaddedEncoding(Attribute encoding) {
+  return getPaddedEncoding(encoding) != nullptr;
+}
+
+unsigned triton::gpu::getMinInterval(Attribute encoding) {
+  auto padded = getPaddedEncoding(encoding);
+  assert(padded && "expected padded encoding or partitioned wrapping padded");
+  return padded.getMinInterval();
 }
