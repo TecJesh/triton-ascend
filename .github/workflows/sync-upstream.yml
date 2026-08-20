@@ -2,18 +2,18 @@
 #
 # This is a THIN wrapper around the TA_main2main_workflow package. All the real
 # logic (detect gap → merge → AI resolve conflicts → build → NPU test → AI fix
-# retry loop → push branch → open PR) lives inside `ta-kickoff --mode=full`.
+# retry loop → push branch → open PR) lives inside `ta-kickoff`.
 # The Action only provisions the environment and runs that one command, exactly
-# like running it locally:
+# like running it locally (sync-upstream_0717.sh is the known-good local
+# invocation; the package is pinned to its `add_merge_ta_main_func` branch):
 #
 #   PUSH_TO_GITHUB=true \
 #   GITHUB_REPO=triton-lang/triton-ascend \
 #   AI_BACKEND=claude \
-#   ta-kickoff --mode=full
+#   ta-kickoff
 #
-# Because --mode=full builds and runs pytest on Ascend NPU, the whole job runs
-# on the self-hosted NPU runner inside the ascend CI container (same image as
-# integration-tests-ascend.yml).
+# The whole job runs on the self-hosted NPU runner inside the ascend CI
+# container (same image as integration-tests-ascend.yml).
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #   ANTHROPIC_API_KEY  — DeepSeek API key (used via Anthropic-compatible API)
@@ -29,8 +29,12 @@ on:
         description: 'Upstream triton commit SHA (leave empty for latest)'
         required: false
         default: ''
+      llvm_commit:
+        description: 'llvm-project commit SHA to fetch and check out (leave empty for latest)'
+        required: true
+        default: ''
       skip_baseline_llvm:
-        description: 'Skip baseline LLVM compilation'
+        description: 'Skip baseline LLVM compilation (default true, matches sync-upstream_0717.sh)'
         required: false
         default: 'false'
       skip_build:
@@ -54,10 +58,10 @@ jobs:
   sync:
     runs-on: linux-aarch64-a3-4
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-a3-ubuntu22.04-py3.10-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-a3-ubuntu22.04-py3.11-latest
     timeout-minutes: 600
     env:
-      PYTHON: "python3.10"
+      PYTHON: "python3.11"
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
       PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
@@ -145,14 +149,20 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.11-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.11-triton-
 
       # ── Install the sync workflow package + Claude Code CLI ────────────────
       - name: Install TA_main2main_workflow
         run: |
+          # Self-hosted runners persist /tmp between jobs — start from a fresh
+          # clone, and pin the known-good branch (same as sync-upstream_0717.sh).
+          rm -rf /tmp/ta-workflow
           git clone https://github.com/TecJesh/main2main_workflow.git /tmp/ta-workflow
           cd /tmp/ta-workflow
+          git fetch origin
+          git checkout add_merge_ta_main_func
+          pip install -r requirements.txt
           ${PYTHON} -m pip install -e .
           echo "TA workflow installed: $(ta-kickoff --help 2>&1 | head -1)"
 
@@ -183,6 +193,8 @@ jobs:
       - name: Clone llvm-project
         shell: bash
         timeout-minutes: 30
+        env:
+          LLVM_TARGET_COMMIT: ${{ inputs.llvm_commit }}
         run: |
           # llvm-project is huge — bump postBuffer and disable low-speed
           # timeouts to avoid fetch-pack / early-EOF disconnects.
@@ -218,16 +230,26 @@ jobs:
             retry git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
           fi
           cd ~/llvm-project
+          # Optional pin: fetch and check out the requested commit
+          # (workflow_dispatch input llvm_commit; empty on schedule — keep
+          # the cloned default HEAD).
+          if [ -n "${LLVM_TARGET_COMMIT:-}" ]; then
+            echo "Fetching requested LLVM commit: $LLVM_TARGET_COMMIT"
+            retry git fetch origin "$LLVM_TARGET_COMMIT"
+            git checkout "$LLVM_TARGET_COMMIT"
+            echo "Checked out LLVM commit: $(git rev-parse HEAD)"
+          fi
           echo "llvm-project ready at ~/llvm-project ($(git rev-parse --short HEAD))"
       - name: Prepare LLVM install prefix
         shell: bash
         run: mkdir -p ~/llvm-install-sync
 
       # ── Run the full sync flow (this is the local command) ─────────────────
-      - name: Run ta-kickoff --mode=full
+      - name: Run ta-kickoff
         shell: bash
         env:
-          # Repo paths — full mode uses the same checkout for both.
+          # Repo paths — the checkout serves as triton-ascend; ~/triton-upstream
+          # is the bare upstream clone used for commit scanning / diffs.
           TRITON_ASCEND_PATH: ${{ github.workspace }}
           TRITON_PATH: ~/triton-upstream
           TRITON_TARGET_COMMIT: ${{ inputs.target_commit }}
@@ -238,15 +260,25 @@ jobs:
           # Enable single-step per-commit merge → build → test → fix pipeline.
           TA_SINGLE_STEP_MODE: "true"
           # Optional skip flags (configure via workflow_dispatch inputs).
-          SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm }}
-          SKIP_BUILD: ${{ inputs.skip_build }}
-          SKIP_E2E_TEST: ${{ inputs.skip_e2e_test }}
+          # Default everywhere: 'false' = do NOT skip baseline LLVM / build /
+          # e2e tests. The `|| 'false'` fallbacks matter for schedule
+          # triggers, where inputs.* is the empty string.
+          SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm || 'false' }}
+          SKIP_BUILD: ${{ inputs.skip_build || 'false' }}
+          SKIP_E2E_TEST: ${{ inputs.skip_e2e_test || 'false' }}
           # Push branch + open PR when everything passes.
           PUSH_TO_GITHUB: "true"
-          GITHUB_REPO: triton-lang/triton-ascend
-          TA_BASE_BRANCH: upstream-sync
-          PR_AUTHOR: TA
-          PR_TYPE: sync
+          GITHUB_REPO: TecJesh/triton-ascend
+          TA_BASE_BRANCH: sync-upstream-main2main
+          # PR opens against the same branch (package default happens to
+          # match, but keep it explicit and in sync with TA_BASE_BRANCH).
+          TA_PR_BASE_BRANCH: sync-upstream-main2main
+          # Base the work branch on `origin` — this checkout only has the
+          # `origin` and `upstream-triton` remotes; the package default
+          # `upstream-ascend` does not exist here (script sets "origin").
+          TA_WORK_BRANCH_BASE: origin
+          PR_AUTHOR: Sync
+          PR_TYPE: feat
           GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           # AI backend: Claude Code CLI wired to DeepSeek's Anthropic-compatible API.
           AI_BACKEND: claude
@@ -270,13 +302,16 @@ jobs:
           source /usr/local/Ascend/cann/set_env.sh || echo "warn: CANN set_env.sh not sourced"
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           npu-smi info || true
-          # Limit build parallelism (nproc/3) and NPU pytest workers (nproc/9)
-          # to match integration-tests-ascend.yml and avoid build / NPU OOM.
+          # MAX_JOBS: nproc/3, matching integration-tests-ascend.yml and the
+          # local script. NUM_PROCS: fixed at 16 — the value tuned in
+          # sync-upstream_0717.sh (more NPU pytest workers caused NPU OOM).
           MAX_JOBS=$(( $(nproc) / 3 )); [ "$MAX_JOBS" -lt 1 ] && MAX_JOBS=1
-          NUM_PROCS=$(( $(nproc) / 9 )); [ "$NUM_PROCS" -lt 1 ] && NUM_PROCS=1
+          NUM_PROCS=16
           export MAX_JOBS NUM_PROCS
           echo "MAX_JOBS=$MAX_JOBS  NUM_PROCS=$NUM_PROCS"
-          ta-kickoff --mode=full
+          # ta-kickoff has no --mode flag on the pinned add_merge_ta_main_func
+          # branch — run it bare, exactly like the known-good script.
+          ta-kickoff
 
       # ── Always surface the workspace (logs, patches, summaries) ────────────
       - name: Upload sync workspace
