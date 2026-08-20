@@ -98,7 +98,7 @@ If you need to customize the LLVM build process, follow the steps below to compi
     TRITON_BUILD_PROTON=OFF \
     TRITON_WHEEL_NAME="triton-ascend" \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    python3 setup_ascend.py install
     ```
 
 ## Development Images
@@ -226,6 +226,50 @@ If you see similar output, the environment is configured correctly:
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
+```
+
+## Running Pytest UT
+
+The source repository provides single-op test cases in the `third_party/ascend/unittest/pytest_ut` directory. Before running the tests, complete the Triton-Ascend installation and set the CANN environment variables.
+
+```bash
+# Set CANN environment variables (using the default installation path `/usr/local/Ascend` as an example)
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+# Install pytest
+pip install pytest pytest-xdist
+```
+
+**Run a Single Test Case**
+
+```bash
+# Taking the vector addition test case as an example
+python -m pytest third_party/ascend/unittest/pytest_ut/test_add.py
+```
+
+**Run All Test Cases**
+
+```bash
+# Run all test cases serially
+python -m pytest third_party/ascend/unittest/pytest_ut
+```
+
+To speed up the tests, specify the number of parallel workers with `-n` (parallel execution requires installing pytest-xdist):
+
+```bash
+python -m pytest -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+To print detailed test progress, add the `-sv` option:
+
+```bash
+python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+The output after execution is similar to the following:
+
+```text
+collected 6 items
+third_party/ascend/unittest/pytest_ut/test_add.py ......
 ```
 
 ## Installation FAQ
