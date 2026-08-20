@@ -35,4 +35,3 @@ func.func @tensor_misc(%arg0: f32, %arg1: f32) {
   memref.dealloc %alloc : memref<1x2xf32>
   return
 }
-

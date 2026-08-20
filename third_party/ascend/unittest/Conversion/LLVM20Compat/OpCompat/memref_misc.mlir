@@ -33,4 +33,3 @@ func.func @memref_extract_aligned_pointer_as_index(%arg0: memref<?xi32>) -> inde
   %p = memref.extract_aligned_pointer_as_index %arg0 : memref<?xi32> -> index
   return %p : index
 }
-
