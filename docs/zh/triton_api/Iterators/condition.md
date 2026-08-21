@@ -14,7 +14,7 @@ triton.language.condition(arg1, disable_licm=False)
 
 | 参数 | 类型 | 默认值 | 含义说明 |
 |------|------|--------|----------|
-| `arg1` | `tensor` | 必需 | 循环条件表达式，必须为标量布尔张量（`bool`/`int1`），如 `i < n` 的比较结果 |
+| `arg1` | `tensor` | 必需 | 循环条件表达式，需为标量张量；GPU 上为标量布尔张量（`bool`/`int1`），Ascend A2/A3/950 额外支持 uint8、int8、int16、int32、int64、fp16、fp32、bf16 类型，如 `i < n` 的比较结果 |
 | `disable_licm` | `bool` | `False` | 告知编译器不要将循环不变代码外提（LICM）到循环外。当循环内存在生命周期很长的变量时，禁用 LICM 可以避免产生过长的活动区间（live range） |
 
 返回值：
@@ -25,10 +25,10 @@ triton.language.condition(arg1, disable_licm=False)
 | 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | GPU | × | × | × | × | × | × | × | × | × | × | × | × | × | × | √ |
-| Ascend A2/A3 | × | × | × | × | × | × | × | × | × | × | × | × | × | × | √ |
-| Ascend 950 | × | × | × | × | × | × | × | × | × | × | × | × | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
 
-结论：循环条件表达式必须为标量布尔张量（`bool`），各平台均支持。
+结论：GPU 仅支持 bool；Ascend A2/A3 与 Ascend 950 额外支持 uint8、int8、int16、int32、int64、fp16、fp32、bf16 类型。
 
 ### 2.3 特殊限制说明
 
