@@ -30,12 +30,12 @@ triton.language.bitonic_merge(x, dim: constexpr = None, descending: constexpr = 
 | 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | GPU | √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ | × | × | √ |
-| Ascend A2/A3 | × | √ | × | √ | × | × | × | × | √ | √ | × | √ | × | × | × |
-| Ascend 950 | × | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | √ | √ | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | √ | √ | √ |
 
 结论：
-- Ascend A2/A3 对比 GPU 缺失 uint8、int32、int64、fp64、bool 的支持能力。
-- Ascend 950 对比 GPU 缺失 uint8、fp64 的支持能力。
+- Ascend A2/A3 对比 GPU 缺失 fp64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 
@@ -50,7 +50,7 @@ triton.language.bitonic_merge(x, dim: constexpr = None, descending: constexpr = 
 
 > 相对社区能力缺失且无法实现
 
-- 毕昇编译器限制，int32、uint8、int64、float64、bool 无法实现。
+- 毕昇编译器限制，fp64 无法实现。
 - 仅支持沿最后一个维度（minor dimension）执行合并，`dim` 传入其他维度会触发编译期断言。
 - 输入在合并维度上必须是 bitonic 序列，否则合并结果为未定义行为。
 - 合并维度的长度必须是 2 的幂。
