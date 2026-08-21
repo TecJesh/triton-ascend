@@ -33,6 +33,15 @@ on:
         description: 'llvm-project commit SHA to fetch and check out (leave empty for latest)'
         required: true
         default: ''
+      llvm_repo_url:
+        description: 'llvm-project repo URL to clone (leave empty for default https://github.com/llvm/llvm-project.git)'
+        required: false
+        default: 'https://github.com/llvm/llvm-project.git'
+      progressive_merge:
+        description: 'Progressive merge: split commits into <=1000-line steps. Disable to skip planning and merge directly to the target commit in one step.'
+        type: boolean
+        required: false
+        default: true
       skip_baseline_llvm:
         description: 'Skip baseline LLVM compilation (default true, matches sync-upstream_0717.sh)'
         required: false
@@ -195,6 +204,9 @@ jobs:
         timeout-minutes: 30
         env:
           LLVM_TARGET_COMMIT: ${{ inputs.llvm_commit }}
+          # `|| 'default'` fallback matters for schedule triggers, where
+          # inputs.* is the empty string.
+          LLVM_REPO_URL: ${{ inputs.llvm_repo_url || 'https://github.com/llvm/llvm-project.git' }}
         run: |
           # llvm-project is huge — bump postBuffer and disable low-speed
           # timeouts to avoid fetch-pack / early-EOF disconnects.
@@ -227,7 +239,7 @@ jobs:
           }
 
           if [ ! -d ~/llvm-project/.git ]; then
-            retry git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
+            retry git clone --depth=1 "${LLVM_REPO_URL}" ~/llvm-project
           fi
           cd ~/llvm-project
           # Optional pin: fetch and check out the requested commit
@@ -263,6 +275,7 @@ jobs:
           # Default everywhere: 'false' = do NOT skip baseline LLVM / build /
           # e2e tests. The `|| 'false'` fallbacks matter for schedule
           # triggers, where inputs.* is the empty string.
+          TA_PROGRESSIVE_MERGE: "${{ github.event.inputs.progressive_merge }}"
           SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm || 'false' }}
           SKIP_BUILD: ${{ inputs.skip_build || 'false' }}
           SKIP_E2E_TEST: ${{ inputs.skip_e2e_test || 'false' }}
