@@ -65,16 +65,16 @@ struct GluonInferLayoutInterface : public triton::DialectInferLayoutInterface {
     return success();
   }
 
-  LogicalResult
-  verifyLayoutsAreEqual(ArrayRef<int64_t> shape, Attribute expected,
-                        Attribute got,
-                        std::optional<Location> loc) const override {
+  LogicalResult verifyLayoutsAreEqual(ArrayRef<int64_t> shape,
+                                      Attribute expected, Attribute got,
+                                      std::optional<Location> loc,
+                                      bool ignoreRegBroadcast) const override {
     return success(expected == got);
   }
 
   LogicalResult
   inferReshapeOpEncoding(ArrayRef<int64_t> srcShape, Attribute srcEnc,
-                         ArrayRef<int64_t> dstShape, Attribute &dstEnc,
+                         ArrayRef<int64_t> dstShape, Attribute &dstEnc, bool,
                          std::optional<Location> loc) const override {
     return inferAutoEncoding(srcEnc, dstEnc);
   }

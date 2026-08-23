@@ -61,7 +61,7 @@ def TritonGPUHoistTMEMAlloc : Pass<"tritongpu-hoist-tmem-alloc", "mlir::ModuleOp
                            "mlir::scf::SCFDialect",
                            "mlir::arith::ArithDialect"];
   let options = [
-    Option<"hoistOutOfIf", "hoist-out-of-if",
+    Option<"postPipeline", "post-pipeline",
            "bool", /*default*/"false",
            "Hoist TMEM allocations out of if statements">
   ];
@@ -118,6 +118,25 @@ def TritonGPUAutomaticWarpSpecialization : Pass<"tritongpu-automatic-warp-specia
   let options = [
     Option<"numStages", "num-stages", "int32_t", /*default*/"3",
            "number of pipeline stages">
+  ];
+}
+
+def TritonGPUNormalizeWSWhileLoops : Pass<"tritongpu-normalize-ws-while-loops", "mlir::ModuleOp"> {
+  let summary = "normalize while loops used by warp specialization";
+
+  let description = [{
+    For CLC `scf.while` operations, promotes `tt.warp_specialize` from one or
+    more direct sibling `scf.for` operations to the enclosing loop. Then
+    normalizes every `scf.while` nested in a warp-specialized loop to use
+    matching state and result signatures.
+  }];
+
+  let dependentDialects = [
+    "mlir::triton::TritonDialect",
+    "mlir::triton::gpu::TritonGPUDialect",
+    "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::arith::ArithDialect"
   ];
 }
 
@@ -228,7 +247,7 @@ def TritonGPUOptimizeDotOperands : Pass<"tritongpu-optimize-dot-operands", "mlir
   let options = [
     Option<"hoistLayoutConversion", "hoist-layout-conversion",
            "bool", /*default*/"true",
-           "whether to move conver to dot operand earlier pass elementwise ops">
+           "whether to move convert to dot operand earlier pass elementwise ops">
   ];
 }
 
@@ -236,8 +255,8 @@ def TritonGPUCoalesce: Pass<"tritongpu-coalesce", "mlir::ModuleOp"> {
   let summary = "coalesce";
 
   let description = [{
-    The pass analyses loads/stores with type `tensor<tt.ptr<>>` or
-    `tt.ptr<tensor<>>` and replaces the layouts of these operations with
+    The pass analyses loads/stores with type `tensor<tt.ptr<>>` and replaces
+    the layouts of these operations with
     coalesced layouts, i.e. cache friendly access patterns.
     Layout conversions are inserted before and after the load/store op
     to maintain consistency with the rest of the program.
@@ -261,6 +280,12 @@ def TritonGPURemoveLayoutConversions : Pass<"tritongpu-remove-layout-conversions
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];
 
+  let options = [
+    Option<"disableRematSplitting", "disable-remat-splitting",
+           "bool", /*default*/"false",
+           "prevent rematerialization from splitting or duplicating "
+           "convert-layout work">
+  ];
 }
 
 def TritonGPUOptimizeThreadLocality : Pass<"tritongpu-optimize-thread-locality", "mlir::ModuleOp"> {

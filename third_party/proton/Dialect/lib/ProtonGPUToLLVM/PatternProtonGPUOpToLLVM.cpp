@@ -114,7 +114,7 @@ struct InitializeOpConversion
     Block *prevBlock = op->getBlock();
 
     // Add the 'if' block.
-    Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
+    Block *ifBlock = prevBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToStart(ifBlock);
 
     // Write back 'preamble'.
@@ -144,7 +144,7 @@ struct InitializeOpConversion
     b.store(initTime, gmemInitTimePtr);
 
     // Add the 'else' block and the condition.
-    Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
+    Block *thenBlock = ifBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToEnd(prevBlock);
     cf::CondBranchOp::create(rewriter, loc, isFirstThread, ifBlock, thenBlock);
     rewriter.setInsertionPointToEnd(ifBlock);
@@ -258,7 +258,7 @@ private:
     //     └─ br continuation
     //   continuation
     Block *prevBlock = op->getBlock();
-    Block *continuation = rewriter.splitBlock(prevBlock, op->getIterator());
+    Block *continuation = prevBlock->splitBlock(op->getIterator());
     Block *leaderBlock = rewriter.createBlock(prevBlock->getParent(),
                                               Region::iterator(continuation));
     rewriter.setInsertionPointToEnd(prevBlock);
@@ -292,7 +292,7 @@ private:
                                 ConversionPatternRewriter &rewriter) const {
     auto loc = op.getLoc();
     auto b = TritonLLVMOpBuilder(loc, rewriter);
-    Block *afterStore = rewriter.splitBlock(continuation, op->getIterator());
+    Block *afterStore = continuation->splitBlock(op->getIterator());
     Block *storeBlock = rewriter.createBlock(op->getParentRegion(),
                                              Region::iterator(afterStore));
 
@@ -333,8 +333,8 @@ private:
     //   loopBody
     //     └─ br loopHeader (idx += threadStride)
     //   exitBlock
-    Block *copyBlock = rewriter.splitBlock(continuation, op->getIterator());
-    Block *exitBlock = rewriter.splitBlock(copyBlock, op->getIterator());
+    Block *copyBlock = continuation->splitBlock(op->getIterator());
+    Block *exitBlock = copyBlock->splitBlock(op->getIterator());
     Block *loopHeader = rewriter.createBlock(
         op->getParentRegion(), Region::iterator(exitBlock), {i32_ty}, {loc});
     Block *loopBody = rewriter.createBlock(
@@ -418,7 +418,7 @@ private:
     //     └─ ...body...
     //     └─ br continuation
     //   continuation
-    Block *continuation = rewriter.splitBlock(thenBlock, op->getIterator());
+    Block *continuation = thenBlock->splitBlock(op->getIterator());
     Block *leaderBlock = rewriter.createBlock(thenBlock->getParent(),
                                               Region::iterator(continuation));
     rewriter.setInsertionPointToEnd(thenBlock);
@@ -537,69 +537,6 @@ protected:
   const proton::gpu::TargetInfoBase &targetInfo;
 };
 
-struct GlobalScratchAllocOpConversion
-    : public ConvertOpToLLVMPattern<triton::gpu::GlobalScratchAllocOp> {
-  explicit GlobalScratchAllocOpConversion(
-      LLVMTypeConverter &typeConverter,
-      const proton::gpu::TargetInfoBase &targetInfo, PatternBenefit benefit)
-      : mlir::ConvertOpToLLVMPattern<triton::gpu::GlobalScratchAllocOp>(
-            typeConverter, benefit),
-        targetInfo(targetInfo) {}
-
-  LogicalResult
-  matchAndRewrite(triton::gpu::GlobalScratchAllocOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-    auto *ctx = rewriter.getContext();
-
-    auto funcOp = op->getParentOfType<LLVM::LLVMFuncOp>();
-    if (!funcOp) {
-      return failure();
-    }
-
-    ModuleOp mod = funcOp.getOperation()->getParentOfType<ModuleOp>();
-    auto ptrTy = mlir::LLVM::LLVMPointerType::get(ctx, 1);
-    assert(op->hasAttr("offset"));
-    size_t offset =
-        cast<IntegerAttr>(op->getAttr("offset")).getValue().getZExtValue();
-
-    Value allocOffset = b.i32_val(offset);
-
-    // See NOTE: [Additional Function Arguments]
-    if (!LLVM::isKernel(funcOp)) {
-      // Base for this function
-      auto gmemBase = funcOp.getArgument(funcOp.getNumArguments() +
-                                         kProfileScratchBufferOffset);
-
-      Value ptr = b.gep(ptrTy, i8_ty, gmemBase, allocOffset);
-      rewriter.replaceOp(op, ptr);
-      return success();
-    }
-
-    // Base for entire kernel
-    auto gmemBase = funcOp.getArgument(funcOp.getNumArguments() +
-                                       kProfileScratchBufferOffset);
-    auto allocSizeAttr = mod.getOperation()->getAttrOfType<mlir::IntegerAttr>(
-        "ttg.profile_scratch_memory_size");
-    assert(allocSizeAttr);
-
-    Value linearId = getLinearId(loc, rewriter);
-
-    auto allocSize = allocSizeAttr.getValue().getZExtValue();
-    Value gmemOffset =
-        b.add(allocOffset, b.mul(linearId, b.i32_val(allocSize)));
-
-    auto ptr = b.gep(ptrTy, i8_ty, gmemBase, gmemOffset);
-
-    rewriter.replaceOp(op, ptr);
-    return success();
-  }
-
-protected:
-  const proton::gpu::TargetInfoBase &targetInfo;
-};
-
 struct InitCtxOpConversion
     : public ConvertOpToLLVMPattern<mlir::triton::proton::gpu::InitCtxOp> {
   explicit InitCtxOpConversion(LLVMTypeConverter &typeConverter,
@@ -630,7 +567,7 @@ struct InitCtxOpConversion
     Block *prevBlock = op->getBlock();
 
     // Add the 'if' block.
-    Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
+    Block *ifBlock = prevBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToStart(ifBlock);
 
     // Initialize the `warp_index` section.
@@ -642,7 +579,7 @@ struct InitCtxOpConversion
     }
 
     // Add the 'else' block and the condition.
-    Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
+    Block *thenBlock = ifBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToEnd(prevBlock);
     cf::CondBranchOp::create(rewriter, loc, isFirstThread, ifBlock, thenBlock);
     rewriter.setInsertionPointToEnd(ifBlock);
@@ -675,7 +612,6 @@ struct RestoreCtxOpConversion
 
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
     auto b = TritonLLVMOpBuilder(loc, rewriter);
-    int numWarps = getTotalNumWarps(mod);
 
     // We need to use the absolute warp id in case warp specialization is used.
     Value threadId = getRawThreadId(rewriter, loc);
@@ -723,8 +659,6 @@ struct SaveCtxOpConversion
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
     auto b = TritonLLVMOpBuilder(loc, rewriter);
 
-    int numWarps = getTotalNumWarps(mod);
-
     int numLanes = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
     Value warpSize = b.i32_val(numLanes);
 
@@ -739,7 +673,7 @@ struct SaveCtxOpConversion
     Block *prevBlock = op->getBlock();
 
     // Add the 'if' block.
-    Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
+    Block *ifBlock = prevBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToStart(ifBlock);
 
     // Update the `warp_index` section.
@@ -750,7 +684,7 @@ struct SaveCtxOpConversion
     b.store(index, gmemWarpIndexPtr);
 
     // Add the 'else' block and the condition.
-    Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
+    Block *thenBlock = ifBlock->splitBlock(op->getIterator());
     rewriter.setInsertionPointToEnd(prevBlock);
     cf::CondBranchOp::create(rewriter, loc, isWarpMaster, ifBlock, thenBlock);
     rewriter.setInsertionPointToEnd(ifBlock);
@@ -799,8 +733,6 @@ void populateProtonGPUOpPatterns(LLVMTypeConverter &typeConverter,
   patterns.add<InitializeOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<FinalizeOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<SegmentAllocOpConversion>(typeConverter, targetInfo, benefit);
-  patterns.add<GlobalScratchAllocOpConversion>(typeConverter, targetInfo,
-                                               benefit);
   patterns.add<InitCtxOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<RestoreCtxOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<SaveCtxOpConversion>(typeConverter, targetInfo, benefit);
@@ -819,7 +751,8 @@ void populateTypeConversions(LLVMTypeConverter &typeConverter,
   typeConverter.addConversion(
       [&](triton::PointerType type) -> std::optional<Type> {
         auto ctx = type.getContext();
-        return LLVM::LLVMPointerType::get(ctx, type.getAddressSpace());
+        return LLVM::LLVMPointerType::get(
+            ctx, targetInfo.getPtrAddressSpace(type.getAddressSpace()));
       });
 }
 

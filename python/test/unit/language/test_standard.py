@@ -27,9 +27,10 @@ def test_maximum_minium(dtype, op, device):
 
 @pytest.mark.interpreter
 @pytest.mark.parametrize("M, N", [[1, 1], [1, 512], [8, 64], [256, 16], [512, 8]])
-@pytest.mark.parametrize("k", [None, 8])
+@pytest.mark.parametrize("k", [None, 1, 8])
 @pytest.mark.parametrize("descending", [False, True])
 @pytest.mark.parametrize("dtype_str", ['int32', 'float16', 'float32', 'bfloat16'])
+@pytest.mark.enable_warmup(min_capability=9)
 def test_sort(M, N, k, descending, dtype_str, device):
 
     @triton.jit
@@ -43,7 +44,7 @@ def test_sort(M, N, k, descending, dtype_str, device):
         if k is None or x.numel < k:
             z = tl.sort(x, descending=descending)
         else:
-            z = tl.topk(x, k)
+            z = tl.topk(x, k, descending=descending)
         offs_z = offs_m[:, None] * stride_zm + offs_z_n[None, :]
         tl.store(Z + offs_z, z)
 
@@ -54,7 +55,7 @@ def test_sort(M, N, k, descending, dtype_str, device):
     if k is None or x.numel() < k:
         y = torch.sort(x, descending=descending)[0]
     else:
-        y = torch.topk(x, k=k).values
+        y = torch.topk(x, k=k, largest=descending).values
     sort_kernel[(1, )](x, x.stride(0), z, z.stride(0), M, N, k, descending, num_warps=8)
     assert (y == z).all(), (y, z)
 
@@ -67,7 +68,7 @@ def test_sort(M, N, k, descending, dtype_str, device):
 @pytest.mark.interpreter
 @pytest.mark.parametrize("M, N, K", [[1, 16, 64], [8, 2, 256], [32, 1, 2], [128, 8, 1]])
 @pytest.mark.parametrize("dtype_str", ['int32', 'float16', 'float32', 'bfloat16'])
-@pytest.mark.parametrize("dim", [0, 1, 2, -2])
+@pytest.mark.parametrize("dim", [0, 1, 2, -2, None])
 def test_flip(M, N, K, dtype_str, dim, device):
 
     @triton.jit
@@ -82,7 +83,7 @@ def test_flip(M, N, K, dtype_str, dim, device):
 
     x = numpy_random((M, N, K), dtype_str=dtype_str)
     x = torch.from_numpy(x).to(device)
-    y = torch.flip(x, (dim, ))
+    y = torch.flip(x, (dim if dim is not None else -1, ))
     z = torch.empty_like(x, device=device)
     flip_kernel[(1, )](x, z, M, N, K, dim, num_warps=8)
     assert (y == z).all(), (y, z)

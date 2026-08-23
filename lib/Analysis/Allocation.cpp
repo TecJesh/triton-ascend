@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <numeric>
 
 #include "mlir/Analysis/Liveness.h"
 #include "mlir/Support/LLVM.h"
@@ -14,11 +15,19 @@
 #include "triton/Tools/LayoutUtils.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "allocation-shared-memory"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
+
+// Returns partition index when partitionSize > 0, otherwise returns 0.
+static size_t getPartitionIndex(size_t offset, size_t partitionSize) {
+  if (partitionSize == 0)
+    return 0;
+  return offset / partitionSize;
+}
 
 namespace ttng = mlir::triton::nvidia_gpu;
 
@@ -29,17 +38,34 @@ namespace mlir {
 //===----------------------------------------------------------------------===//
 namespace triton {
 
-unsigned getNumScratchElemsSwizzledCvt(RankedTensorType srcTy,
-                                       RankedTensorType dstTy) {
-  auto *ctx = srcTy.getContext();
-  auto srcLayout = gpu::toLinearLayout(srcTy);
-  auto dstLayout = gpu::toLinearLayout(dstTy);
-  srcLayout = actionRemoveBroadcastedRegs(srcLayout).apply(srcLayout);
-  dstLayout = actionRemoveBroadcastedRegs(dstLayout).apply(dstLayout);
-  auto bitwidth = getBitwidth(srcTy);
-  auto smem = gpu::optimalSwizzlingLdSt(srcLayout, dstLayout, bitwidth);
+unsigned getNumScratchElemsSwizzledCvt(const LinearLayout &srcLayout,
+                                       const LinearLayout &dstLayout,
+                                       int bitwidth, int numBanks,
+                                       gpu::LocalMemOpTile srcTile,
+                                       gpu::LocalMemOpTile dstTile) {
+  auto *ctx = srcLayout.getInDimNames().begin()->getContext();
+  auto srcLayoutNoBroadcast =
+      actionRemoveBroadcastedRegs(srcLayout).apply(srcLayout);
+  auto dstLayoutNoBroadcast =
+      actionRemoveBroadcastedRegs(dstLayout).apply(dstLayout);
+  auto smem =
+      gpu::optimalSwizzlingLdSt(srcLayoutNoBroadcast, dstLayoutNoBroadcast,
+                                bitwidth, numBanks, srcTile, dstTile);
   auto reps = smem.getInDimSize(StringAttr::get(ctx, "reps"));
-  return smem.getTotalOutDimSize() / reps;
+  // The smem has the same CGA layout as srcLayout, so use that instead.
+  // Remove the number of elements duplicated in the CGA layout.
+  auto nBlocks = product(triton::gpu::getCTASplitNum(
+      gpu::GenericLinearEncodingAttr::get(ctx, srcLayout)));
+  return smem.getTotalOutDimSize() / (reps * nBlocks);
+}
+
+unsigned getNumScratchElemsSwizzledCvt(RankedTensorType srcTy,
+                                       RankedTensorType dstTy, int numBanks,
+                                       gpu::LocalMemOpTile srcTile,
+                                       gpu::LocalMemOpTile dstTile) {
+  return getNumScratchElemsSwizzledCvt(
+      gpu::toLinearLayout(srcTy), gpu::toLinearLayout(dstTy),
+      getBitwidth(srcTy), numBanks, srcTile, dstTile);
 }
 
 // Both `atomic_cas` and `atomic_rmw` may need scratch memory to store values
@@ -68,8 +94,7 @@ static SmallVector<unsigned> getRepShapeForAtomic(Value result) {
 
 unsigned defaultAllocationAnalysisScratchSizeFn(Operation *op) {
   if (auto reduceOp = dyn_cast<ReduceOp>(op)) {
-    ReduceOpHelper helper(reduceOp);
-    return helper.getScratchSizeInBytes();
+    return ReduceOpHelper(reduceOp).getScratchSizeInBytes();
   }
   if (auto scanOp = dyn_cast<ScanOp>(op)) {
     ScanLoweringHelper helper(scanOp);
@@ -89,13 +114,20 @@ unsigned defaultAllocationAnalysisScratchSizeFn(Operation *op) {
   if (auto cvtLayout = dyn_cast<gpu::ConvertLayoutOp>(op)) {
     auto srcTy = cvtLayout.getSrc().getType();
     auto dstTy = cvtLayout.getType();
-    if (!cvtNeedsSharedMemory(srcTy, dstTy))
+    if (!cvtNeedsSharedMemory(cvtLayout))
       return 0;
     // The generic pass uses swizzling
     auto elems = getNumScratchElemsSwizzledCvt(srcTy, dstTy);
     return elems * getBitwidth(srcTy) / 8;
   }
-  if (isa<AtomicRMWOp, AtomicCASOp>(op)) {
+  if (auto poll = dyn_cast<AtomicPollOp>(op)) {
+    // A poll without a timeout can only return true, so its result does not
+    // need to be broadcast through shared memory.
+    if (!poll.getTimeout())
+      return 0;
+  }
+  if (isa<gpu::LocalAtomicScatterRMWOp, AtomicPollOp>(op) ||
+      isa<AtomicOpInterface>(op)) {
     auto value = op->getOperand(0);
     auto smemShape = getRepShapeForAtomic(op->getResult(0));
     auto elems = getNumScratchElements(smemShape);
@@ -108,7 +140,36 @@ unsigned defaultAllocationAnalysisScratchSizeFn(Operation *op) {
     constexpr int32_t kTMASize = 128;
     return kTMASize;
   }
+  if (auto ws = dyn_cast<gpu::WarpSpecializeOp>(op)) {
+    return ws.getCaptureSize();
+  }
   return 0;
+}
+
+bool hasCrossCTAScratch(Operation *op) {
+  if (gpu::lookupNumCTAs(op) == 1)
+    return false;
+  if (auto cvt = dyn_cast<gpu::ConvertLayoutOp>(op)) {
+    auto block = StringAttr::get(op->getContext(), "block");
+    return !isCvtDimSync(gpu::toLinearLayout(cvt.getSrc().getType()),
+                         gpu::toLinearLayout(cvt.getType()), block);
+  }
+  if (auto reduce = dyn_cast<ReduceOp>(op))
+    return !ReduceOpHelper(reduce).isReduceWithinCTA();
+  if (auto poll = dyn_cast<AtomicPollOp>(op))
+    return poll.getTimeout() && !poll.getResult().use_empty();
+  if (isa<AtomicOpInterface, gpu::LocalAtomicScatterRMWOp>(op)) {
+    Value result = op->getResult(0);
+    if (result.use_empty())
+      return false;
+    auto resultTy = dyn_cast<RankedTensorType>(result.getType());
+    if (!resultTy)
+      return true;
+    auto block = StringAttr::get(op->getContext(), "block");
+    return gpu::toLinearLayout(resultTy).getFreeVariableMasks().lookup(block) !=
+           0;
+  }
+  return false;
 }
 
 class AllocationAnalysis {
@@ -116,9 +177,11 @@ public:
   AllocationAnalysis(Operation *operation,
                      Allocation::FuncAllocMapT *funcAllocMap,
                      Allocation *allocation,
-                     AllocationAnalysisScratchSizeFn scratchSizeGetter)
+                     AllocationAnalysisScratchSizeFn scratchSizeGetter,
+                     size_t partitionSize)
       : operation(operation), funcAllocMap(funcAllocMap),
-        allocation(allocation), scratchSizeGetter(scratchSizeGetter) {
+        allocation(allocation), scratchSizeGetter(scratchSizeGetter),
+        partitionSize(partitionSize) {
     run();
   }
 
@@ -143,19 +206,47 @@ private:
     if (!alloc || !alloc.isSharedMemoryAlloc())
       return;
     auto allocType = alloc.getType();
-    int64_t numElems = 0;
-    if (auto paddedEnc =
-            dyn_cast<gpu::PaddedSharedEncodingAttr>(allocType.getEncoding())) {
-      SmallVector<int64_t> unpaddedShape = gpu::getShapePerCTA(allocType);
-      numElems = paddedEnc.getPaddedSize(unpaddedShape);
-    } else {
-      auto shapePerCTA = gpu::getAllocationShapePerCTA(allocType);
-      numElems = product<int64_t>(shapePerCTA);
+    auto alignment = alloc.getAlignmentOrDefault();
+
+    // Handle PartitionedSharedEncodingAttr: create one buffer per partition,
+    // where each buffer contains all groups for that partition concatenated.
+    // With numPartitions=2, numGroups=4: creates 2 buffers, each containing
+    // 4 concatenated pieces.
+    if (auto partitionedEnc = dyn_cast<gpu::PartitionedSharedEncodingAttr>(
+            allocType.getEncoding())) {
+      unsigned numPartitions = partitionedEnc.getNumPartitions();
+      unsigned numGroups = partitionedEnc.getNumGroups();
+      unsigned numLogicalPieces = partitionedEnc.getNumLogicalPieces();
+
+      // Calculate size per logical piece
+      int64_t totalNumElems = gpu::getAllocationElems(
+          allocType.getEncoding(), allocType.getAllocShape());
+      if (auto padded = gpu::getPaddedEncoding(allocType.getEncoding()))
+        totalNumElems = padded.getPaddedSize({totalNumElems});
+
+      int64_t totalBytes =
+          totalNumElems *
+          getIntOrFloatOrPtrBitWidth(allocType.getElementType()) / 8;
+      int64_t pieceSize = totalBytes / numLogicalPieces;
+
+      // Each partition buffer contains all groups concatenated
+      int64_t partitionBufferSize = pieceSize * numGroups;
+
+      // Create buffers for each partition. All partition buffers are neighbors
+      // (must be placed in different physical shared memory partitions).
+      allocation->addPartitionBuffers(alloc, numPartitions, partitionBufferSize,
+                                      alignment);
+      return;
     }
+
+    // Standard (non-partitioned) buffer allocation
+    int64_t numElems = gpu::getAllocationElems(allocType.getEncoding(),
+                                               allocType.getAllocShape());
+    if (auto padded = gpu::getPaddedEncoding(allocType.getEncoding()))
+      numElems = padded.getPaddedSize({numElems});
     int64_t bytes =
         numElems * getIntOrFloatOrPtrBitWidth(allocType.getElementType()) / 8;
 
-    auto alignment = alloc.getAlignmentOrDefault();
     allocation->addBuffer<BufferT::BufferKind::Explicit>(alloc, bytes,
                                                          alignment);
   }
@@ -188,7 +279,8 @@ private:
     if (auto ws = dyn_cast<gpu::WarpSpecializeOp>(op)) {
       // `ttg.warp_specialize` needs memory to pass its explicit captures. Pack
       // the captures like a struct.
-      auto [captureSize, captureAlign] = ws.getCaptureSizeAlign();
+      auto captureSize = scratchSizeGetter(op);
+      auto captureAlign = ws.getCaptureAlign();
       maybeAddScratchBuffer<BufferT::BufferKind::Scratch>(op, captureSize,
                                                           captureAlign);
       return;
@@ -247,16 +339,23 @@ private:
 
   /// Computes the liveness range of the allocated value.
   /// Each buffer is allocated only once.
+  /// For partitioned tensors, all partition buffers share the same liveness
+  /// range.
   void resolveExplicitBufferLiveness(
       function_ref<Interval<size_t>(Value value)> getLiveness) {
-    for (auto valueBufferIter : allocation->valueBuffer) {
+    for (auto &valueBufferIter : allocation->valueBuffer) {
       auto value = valueBufferIter.first;
-      auto *buffer = valueBufferIter.second;
-      bufferRange[buffer] = getLiveness(value);
-      LLVM_DEBUG({
-        llvm::dbgs() << "-- buffer " << buffer->id << "; value: ";
-        value.dump();
-      });
+      auto &buffers = valueBufferIter.second;
+      auto range = getLiveness(value);
+
+      // Apply the same liveness range to all buffers for this value
+      for (auto *buffer : buffers) {
+        bufferRange[buffer] = range;
+        LLVM_DEBUG({
+          llvm::dbgs() << "-- buffer " << buffer->id << "; value: ";
+          value.dump();
+        });
+      }
     }
   }
 
@@ -429,6 +528,32 @@ private:
     LLVM_DEBUG(dumpAllocationSize());
   }
 
+  /// Partition eligibility check: returns true if placing
+  /// `buffer` at `proposedOffset` keeps it in different physical partition(s)
+  /// than all of its already-placed partition neighbors.
+  bool isPartitionEligible(BufferT *buffer, size_t proposedOffset,
+                           const DenseSet<BufferT *> &placed) {
+    if (partitionSize == 0 || buffer->neighbors.empty())
+      return true;
+
+    // Footprints are compared as inclusive partition-index ranges, so a buffer
+    // that straddles a partition boundary is handled correctly.
+    size_t aLo = getPartitionIndex(proposedOffset, partitionSize);
+    size_t aHi =
+        getPartitionIndex(proposedOffset + buffer->size - 1, partitionSize);
+    for (auto *neighbor : buffer->neighbors) {
+      if (!placed.contains(neighbor))
+        continue;
+      size_t bLo = getPartitionIndex(neighbor->offset, partitionSize);
+      size_t bHi = getPartitionIndex(neighbor->offset + neighbor->size - 1,
+                                     partitionSize);
+      // Inclusive partition ranges overlap -> shares a physical partition.
+      if (aLo <= bHi && bLo <= aHi)
+        return false;
+    }
+    return true;
+  }
+
   /// Computes the initial shared memory offsets.
   void calculateStarts(const SmallVector<BufferT *> &buffers) {
     //  v = values in shared memory
@@ -452,28 +577,64 @@ private:
     TripleMapT tripleMap;
     tripleMap.insert(std::make_pair(0, Interval<size_t>()));
     SmallVector<BufferT *> xBuffers = buffers;
+    DenseSet<BufferT *> placed;
     while (!xBuffers.empty()) {
+      // 1) Pick the lowest-offset available slot.
       auto tripleIt = tripleMap.begin();
-      auto offset = tripleIt->first;
-      auto range = tripleIt->second;
+      size_t offset = tripleIt->first;
+      Interval<size_t> range = tripleIt->second;
       tripleMap.erase(tripleIt);
-      auto bufferIt =
-          std::find_if(xBuffers.begin(), xBuffers.end(), [&](auto *buffer) {
-            auto xRange = bufferRange[buffer];
-            bool res = xRange.intersects(range);
-            for (const auto &val : tripleMap)
-              res = res &&
-                    !val.second.intersects(xRange); // only one buffer intersect
-            return res;
-          });
-      if (bufferIt != xBuffers.end()) {
-        auto buffer = *bufferIt;
-        auto xSize = buffer->size;
-        auto xRange = bufferRange.lookup(buffer);
+
+      // 2) Buffers whose whole liveness fits this slot's liveness range
+      // and no other open slot.
+      SmallVector<BufferT *> livenessEligible;
+      for (auto *buffer : xBuffers) {
+        Interval<size_t> live = bufferRange.lookup(buffer);
+        if (!live.intersects(range))
+          continue;
+        if (llvm::none_of(tripleMap, [&](const auto &slot) {
+              return slot.second.intersects(live);
+            }))
+          livenessEligible.push_back(buffer);
+      }
+
+      // 3) The first that is also clear of its placed neighbors' partitions
+      // (for non-partitioned buffers, simply the first candidate).
+      BufferT *chosen = nullptr;
+      for (auto *buffer : livenessEligible) {
+        size_t alignedOffset = llvm::alignTo(offset, buffer->alignment);
+        if (isPartitionEligible(buffer, alignedOffset, placed)) {
+          chosen = buffer;
+          break;
+        }
+      }
+
+      // 4) Give `chosen` this slot's offset and split the slot's remaining free
+      // space around its liveness. If nothing was partition-eligible, reopen
+      // the slot at the smallest offset that clears some conflicting buffer's
+      // neighbors so that buffer becomes eligible next iteration; this only
+      // ever raises the offset, so the loop keeps making progress. If nothing
+      // was even liveness-eligible, the slot is simply dropped.
+      //
+      //     offset      shared memory     physical partition
+      //
+      //               +-----------------+
+      //               |  requeued slot  |   part 1  -> re-added to tripleMap;
+      //               |                 |              P1 placed here next iter
+      //       65536   +=================+   <- first boundary past P0's end
+      //               |  picked slot    |   part 0  -> P1 is liveness-eligible
+      //               |  (P1 blocked)   |              but blocked by P0,
+      //               |                 |              so skipped.
+      //       40000   +-----------------+
+      //               |  P0 (placed)    |   part 0  (P1's neighbor)
+      //           0   +-----------------+
+      if (chosen) {
         // TODO(Keren): A buffer's size shouldn't be determined here, have to
         // clean it up
-        size_t alignOffset = buffer->setOffsetAligned(offset);
-        tripleMap.insert({alignOffset + xSize,
+        size_t alignOffset = chosen->setOffsetAligned(offset);
+        placed.insert(chosen);
+        Interval<size_t> xRange = bufferRange.lookup(chosen);
+        tripleMap.insert({alignOffset + chosen->size,
                           Interval{std::max(range.start(), xRange.start()),
                                    std::min(range.end(), xRange.end())}});
         // We could either insert (range.start, xRange.start) or (range.start,
@@ -484,14 +645,39 @@ private:
           tripleMap.insert({offset, Interval{range.start(), xRange.end()}});
         if (xRange.end() < range.end())
           tripleMap.insert({offset, Interval{xRange.start(), range.end()}});
-        xBuffers.erase(bufferIt);
+        xBuffers.erase(std::find(xBuffers.begin(), xBuffers.end(), chosen));
+      } else if (!livenessEligible.empty()) {
+        assert(partitionSize > 0 &&
+               "candidates can only be blocked when partitioning is active");
+        size_t newSlotOffset = std::numeric_limits<size_t>::max();
+        for (BufferT *buffer : livenessEligible) {
+          // Smallest offset at which `buffer` lands in a partition free of all
+          // its already-placed neighbors. Stays 0 if it has no placed
+          // neighbors.
+          size_t clearOffset = 0;
+          for (BufferT *neighbor : buffer->neighbors)
+            if (placed.contains(neighbor)) {
+              // First offset strictly above every physical partition `neighbor`
+              // occupies.
+              size_t pastNeighbor =
+                  (getPartitionIndex(neighbor->offset + neighbor->size - 1,
+                                     partitionSize) +
+                   1) *
+                  partitionSize;
+              clearOffset = std::max(clearOffset, pastNeighbor);
+            }
+          newSlotOffset = std::min(newSlotOffset, clearOffset);
+        }
+        assert(newSlotOffset > offset && "reopened slot must make progress");
+        tripleMap.insert({newSlotOffset, range});
       }
     }
     LLVM_DEBUG(dumpBuffers());
   }
 
   /// Builds a graph of all shared memory values. Edges are created between
-  /// shared memory values that are overlapping.
+  /// shared memory values that are overlapping, or between partition neighbors
+  /// that are placed in the same physical partition.
   void buildInterferenceGraph(const SmallVector<BufferT *> &buffers,
                               GraphT &interference) {
     // Reset interference graph
@@ -527,12 +713,30 @@ private:
           interference[x].insert(y);
         }
       }
+
+      // Partition neighbors interfere if they are in the same
+      // physical partition. This ensures that different partitions of the
+      // same partitioned tensor are placed in different physical partitions.
+      // Only check this when partitioning is enabled (partitionSize > 0).
+      if (partitionSize > 0) {
+        size_t xLo = getPartitionIndex(x->offset, partitionSize);
+        size_t xHi = getPartitionIndex(x->offset + x->size - 1, partitionSize);
+        for (auto *neighbor : x->neighbors) {
+          size_t nLo = getPartitionIndex(neighbor->offset, partitionSize);
+          size_t nHi = getPartitionIndex(neighbor->offset + neighbor->size - 1,
+                                         partitionSize);
+          if (xLo <= nHi && nLo <= xHi)
+            interference[x].insert(neighbor);
+        }
+      }
     }
 
     LLVM_DEBUG(dumpInterferenceGraph(interference));
   }
 
   /// Finalizes shared memory offsets considering interference.
+  /// For partition neighbors, bumps to the next physical partition boundary
+  /// to ensure they are placed in different physical partitions.
   void allocate(const SmallVector<BufferT *> &buffers,
                 const GraphT &interference) {
     // Reset shared memory size
@@ -570,7 +774,21 @@ private:
     for (auto x : buffers) {
       size_t newOffset = 0;
       for (auto y : interference.lookup(x)) {
-        newOffset = std::max(newOffset, y->offset + y->size);
+        // Check if y is a partition neighbor of x
+        bool isPartitionNeighbor =
+            std::find(x->neighbors.begin(), x->neighbors.end(), y) !=
+            x->neighbors.end();
+        if (isPartitionNeighbor && partitionSize > 0) {
+          // For partition neighbors, bump past the neighbor's partition(s) so
+          // they end up in different physical partitions.
+          size_t offsetPastY =
+              (getPartitionIndex(y->offset + y->size - 1, partitionSize) + 1) *
+              partitionSize;
+          newOffset = std::max(newOffset, offsetPastY);
+        } else {
+          // Regular interference - just move past the interfering buffer
+          newOffset = std::max(newOffset, y->offset + y->size);
+        }
       }
       if (colors.lookup(x) != 0)
         x->setOffsetAligned(newOffset);
@@ -586,15 +804,48 @@ private:
   Allocation *allocation;
   BufferRangeMapT bufferRange;
   AllocationAnalysisScratchSizeFn scratchSizeGetter;
+  size_t partitionSize;
 };
 
 } // namespace triton
 
-void Allocation::run(
-    FuncAllocMapT &funcAllocMap,
-    triton::AllocationAnalysisScratchSizeFn scratchSizeGetter) {
+void Allocation::run(FuncAllocMapT &funcAllocMap,
+                     triton::AllocationAnalysisScratchSizeFn scratchSizeGetter,
+                     size_t sharedMemoryPartitionSize) {
   triton::AllocationAnalysis(getOperation(), &funcAllocMap, this,
-                             scratchSizeGetter);
+                             scratchSizeGetter, sharedMemoryPartitionSize);
+}
+
+void Allocation::addPartitionBuffers(Value key, unsigned numPartitions,
+                                     size_t partitionSize, size_t alignment) {
+  SmallVector<BufferT *> partitionBuffers;
+  partitionBuffers.reserve(numPartitions);
+
+  Operation *ownerOp = key.getDefiningOp();
+
+  // Create all partition buffers first
+  for (unsigned i = 0; i < numPartitions; ++i) {
+    BufferId nextId = bufferIdCounter++;
+    auto [it, inserted] = bufferSet.insert_or_assign(
+        nextId, BufferT(BufferT::BufferKind::Explicit, nextId, ownerOp,
+                        partitionSize, alignment));
+    partitionBuffers.push_back(&it->second);
+  }
+
+  // Link all different partitions as neighbors.
+  // This ensures they are placed in different physical shared memory
+  // partitions.
+  for (unsigned i = 0; i < numPartitions; ++i) {
+    for (unsigned j = 0; j < numPartitions; ++j) {
+      if (i != j) {
+        partitionBuffers[i]->neighbors.push_back(partitionBuffers[j]);
+      }
+    }
+  }
+
+  // Store all partition buffers in valueBuffer
+  // (all partitions share the same liveness range via their owner)
+  valueBuffer[key] = std::move(partitionBuffers);
 }
 
 std::map<Operation *, SmallVector<Allocation::BufferId>>
@@ -608,12 +859,14 @@ Allocation::getLiveBuffers() {
     if (scratchBuffer != InvalidBufferId)
       liveBuffers[op].push_back(scratchBuffer);
     for (auto result : op->getOpResults()) {
-      auto bufferId = getBufferId(result);
-      if (bufferId == Allocation::InvalidBufferId)
+      auto bufferIds = getBufferIds(result);
+      if (bufferIds.empty())
         continue;
       auto liveOperations = liveness.resolveLiveness(result);
-      for (auto depOp : liveOperations)
-        liveBuffers[depOp].push_back(bufferId);
+      for (auto depOp : liveOperations) {
+        for (auto bufferId : bufferIds)
+          liveBuffers[depOp].push_back(bufferId);
+      }
     }
   };
   rootOperation->walk(analyzeOperation);

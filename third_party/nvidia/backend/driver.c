@@ -8,9 +8,19 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#ifndef CU_FUNC_ATTRIBUTE_SHARED_MEMORY_MODE
+#define CU_FUNC_ATTRIBUTE_SHARED_MEMORY_MODE 17
+#endif
+#ifndef CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY
+#define CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY 3
+#endif
+#ifndef CU_LAUNCH_ATTRIBUTE_SHARED_MEMORY_MODE
+#define CU_LAUNCH_ATTRIBUTE_SHARED_MEMORY_MODE 18
+#endif
+
 typedef struct {
   PyObject_HEAD;
-  _Alignas(128) CUtensorMap tensorMap;
+  _Alignas(alignof(CUtensorMap)) CUtensorMap tensorMap;
 } PyCUtensorMapObject;
 
 typedef enum { ARG_CONSTEXPR = 0, ARG_KERNEL = 1, ARG_TUPLE = 2 } ArgType;
@@ -110,6 +120,18 @@ static bool gpuAssert(CUresult code, const char *file, int line) {
     }                                                                          \
   } while (0)
 
+static void ensureCudaContext() {
+  CUcontext pctx;
+  CUDA_CHECK(cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    // Ensure device context.
+    CUdevice device;
+    CUDA_CHECK(cuDeviceGet(&device, 0));
+    CUDA_CHECK(cuDevicePrimaryCtxRetain(&pctx, device));
+    CUDA_CHECK(cuCtxSetCurrent(pctx));
+  }
+}
+
 static PyObject *getDeviceProperties(PyObject *self, PyObject *args) {
   int device_id;
   if (!PyArg_ParseTuple(args, "i", &device_id))
@@ -126,9 +148,26 @@ static PyObject *getDeviceProperties(PyObject *self, PyObject *args) {
   int sm_clock_rate;
   int mem_clock_rate;
   int mem_bus_width;
+  int major;
+  int minor;
+
   CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
-      &max_shared_mem, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
-      device));
+      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
+  CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
+      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+
+  // XXX: remove attribute enum def once latest cuda.h is in use
+  int CU_DEVICE_ATTRIBUTE_MAX_OVERSIZED_SHARED_MEMORY_PER_BLOCK = 150;
+  if (major == 10 && minor == 7) {
+    CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
+        &max_shared_mem,
+        CU_DEVICE_ATTRIBUTE_MAX_OVERSIZED_SHARED_MEMORY_PER_BLOCK, device));
+  } else {
+    CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
+        &max_shared_mem, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+        device));
+  }
+
   CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
       &max_num_regs, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK, device));
   CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
@@ -148,6 +187,91 @@ static PyObject *getDeviceProperties(PyObject *self, PyObject *args) {
                        warp_size, "sm_clock_rate", sm_clock_rate,
                        "mem_clock_rate", mem_clock_rate, "mem_bus_width",
                        mem_bus_width);
+
+cleanup:
+  return NULL;
+}
+
+static PyObject *getDeviceCapability(PyObject *self, PyObject *args) {
+  int device_id;
+  if (!PyArg_ParseTuple(args, "i", &device_id))
+    return NULL;
+
+  CUdevice device;
+  int major;
+  int minor;
+  CUDA_CHECK_AND_RETURN_NULL(cuDeviceGet(&device, device_id));
+  CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
+      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
+  CUDA_CHECK_AND_RETURN_NULL(cuDeviceGetAttribute(
+      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+
+  return Py_BuildValue("(ii)", major, minor);
+
+cleanup:
+  return NULL;
+}
+
+static PyObject *getCurrentDevice(PyObject *self, PyObject *args) {
+  if (!PyArg_ParseTuple(args, "")) {
+    return NULL;
+  }
+
+  ensureCudaContext();
+  if (PyErr_Occurred()) {
+    return NULL;
+  }
+
+  CUdevice device;
+  CUDA_CHECK_AND_RETURN_NULL(cuCtxGetDevice(&device));
+  return PyLong_FromLong(device);
+
+cleanup:
+  return NULL;
+}
+
+static PyObject *setCurrentDevice(PyObject *self, PyObject *args) {
+  int device;
+  if (!PyArg_ParseTuple(args, "i", &device)) {
+    return NULL;
+  }
+
+  CUcontext pctx = 0;
+  Py_BEGIN_ALLOW_THREADS;
+  CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
+      cuDevicePrimaryCtxRetain(&pctx, device));
+  CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuCtxSetCurrent(pctx));
+  Py_END_ALLOW_THREADS;
+
+  Py_RETURN_NONE;
+}
+
+static PyObject *getDefaultStream(PyObject *self, PyObject *args) {
+  int device;
+  if (!PyArg_ParseTuple(args, "i", &device)) {
+    return NULL;
+  }
+
+  CUcontext pctx = 0;
+  Py_BEGIN_ALLOW_THREADS;
+  CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
+      cuDevicePrimaryCtxRetain(&pctx, device));
+  CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuCtxSetCurrent(pctx));
+  Py_END_ALLOW_THREADS;
+
+  // CUDA default stream is always 0.
+  return PyLong_FromUnsignedLongLong(0);
+}
+
+static PyObject *isStreamCapturing(PyObject *self, PyObject *args) {
+  uint64_t stream;
+  if (!PyArg_ParseTuple(args, "K", &stream)) {
+    return NULL;
+  }
+
+  CUstreamCaptureStatus status;
+  CUDA_CHECK_AND_RETURN_NULL(cuStreamIsCapturing((CUstream)stream, &status));
+  return PyBool_FromLong(status != CU_STREAM_CAPTURE_STATUS_NONE);
 
 cleanup:
   return NULL;
@@ -195,18 +319,28 @@ static PyObject *loadBinary(PyObject *self, PyObject *args) {
   CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuDeviceGetAttribute(
       &shared_optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
       device));
+  assert(shared_optin <= 228 * 1024 && "sanity check");
   if (shared > 49152 && shared_optin > 49152) {
-    CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
-        cuFuncSetCacheConfig(fun, CU_FUNC_CACHE_PREFER_SHARED));
-    int shared_total, shared_static;
-    CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuDeviceGetAttribute(
-        &shared_total, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
-        device));
-    CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuFuncGetAttribute(
-        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, fun));
-    CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
-        cuFuncSetAttribute(fun, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                           shared_optin - shared_static));
+    // XXX: remove attribute enum defs once latest cuda.h is in use
+    // try to use oversized shared memory via new API
+    // L1$ size is set to 8KB, CGA scheduling must be in SPREAD mode.
+    if (CUDA_SUCCESS !=
+        cuFuncSetAttribute(
+            fun, CU_FUNC_ATTRIBUTE_SHARED_MEMORY_MODE,
+            CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY)) {
+      // use legacy api if cuda doesn't support oversized shared memory
+      CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
+          cuFuncSetCacheConfig(fun, CU_FUNC_CACHE_PREFER_SHARED));
+      int shared_total, shared_static;
+      CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuDeviceGetAttribute(
+          &shared_total,
+          CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR, device));
+      CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuFuncGetAttribute(
+          &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, fun));
+      CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuFuncSetAttribute(
+          fun, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+          shared_optin - shared_static));
+    }
   }
   Py_END_ALLOW_THREADS;
 
@@ -215,6 +349,19 @@ static PyObject *loadBinary(PyObject *self, PyObject *args) {
   }
   return Py_BuildValue("(KKiii)", (uint64_t)mod, (uint64_t)fun, n_regs,
                        n_spills, n_max_threads);
+}
+
+static PyObject *unloadModule(PyObject *self, PyObject *args) {
+  CUmodule mod;
+  if (!PyArg_ParseTuple(args, "K", &mod)) {
+    return NULL;
+  }
+
+  Py_BEGIN_ALLOW_THREADS;
+  CUDA_CHECK_AND_RETURN_NULL_ALLOW_THREADS(cuModuleUnload(mod));
+  Py_END_ALLOW_THREADS;
+
+  return Py_None;
 }
 
 typedef CUresult (*cuOccupancyMaxActiveClusters_t)(
@@ -578,14 +725,12 @@ static PyObject *fillTMADescriptorIm2col(PyObject *self, PyObject *args) {
   int padding;
   PyObject *pixelBoxLower;
   PyObject *pixelBoxUpper;
-  int channelsPerPixel;
-  int pixelsPerColumn;
   PyObject *elementStrides;
 
-  if (!PyArg_ParseTuple(args, "KiiiOOOiOOiiO", &global_address, &swizzle,
+  if (!PyArg_ParseTuple(args, "KiiiOOOiOOO", &global_address, &swizzle,
                         &elemSize, &elemType, &blockSize, &shape, &strides,
                         &padding, &pixelBoxLower, &pixelBoxUpper,
-                        &channelsPerPixel, &pixelsPerColumn, &elementStrides)) {
+                        &elementStrides)) {
     return NULL;
   }
 
@@ -630,6 +775,11 @@ static PyObject *fillTMADescriptorIm2col(PyObject *self, PyObject *args) {
   if (!blockSizeFast)
     goto cleanup;
   int blockRank = PySequence_Fast_GET_SIZE(blockSizeFast);
+  if (blockRank != 2) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "blockSize must have exactly 2 dimensions for im2col");
+    goto cleanup;
+  }
 
   for (int i = 0; i < blockRank; ++i) {
     PyObject *item = PySequence_Fast_GET_ITEM(blockSizeFast, i);
@@ -747,6 +897,9 @@ static PyObject *fillTMADescriptorIm2col(PyObject *self, PyObject *args) {
   INITIALIZE_FUNCTION_POINTER_IF_NULL(cuTensorMapEncodeIm2col,
                                       getCuTensorMapEncodeIm2colHandle);
 
+  int channelsPerPixel = blockSizeInt[0];
+  int pixelsPerColumn = blockSizeInt[1];
+
   CUresult res = cuTensorMapEncodeIm2col(
       &desc->tensorMap, elemType, rank, (void *)global_address, shapeInt,
       stridesLL, pixelBoxLowerInt, pixelBoxUpperInt, channelsPerPixel,
@@ -826,18 +979,6 @@ cleanup:
   return NULL;
 }
 
-static void ensureCudaContext() {
-  CUcontext pctx;
-  CUDA_CHECK(cuCtxGetCurrent(&pctx));
-  if (!pctx) {
-    // Ensure device context.
-    CUdevice device;
-    CUDA_CHECK(cuDeviceGet(&device, 0));
-    CUDA_CHECK(cuDevicePrimaryCtxRetain(&pctx, device));
-    CUDA_CHECK(cuCtxSetCurrent(pctx));
-  }
-}
-
 static void _launch(int gridX, int gridY, int gridZ, int num_warps,
                     int num_ctas, int launch_cooperative_grid, int launch_pdl,
                     int shared_memory, CUstream stream, CUfunction function,
@@ -861,6 +1002,18 @@ static void _launch(int gridX, int gridY, int gridZ, int num_warps,
     config.hStream = stream;
     config.attrs = launchAttr;
     int num_attrs = 0;
+
+    if (shared_memory > 228 * 1024) {
+      {
+        // XXX: remove attribute defs once driver with new API is in use
+        // L1$ size is set to 8KB, CGA scheduling must be in SPREAD mode.
+        CUlaunchAttribute attr = {
+            .id = CU_LAUNCH_ATTRIBUTE_SHARED_MEMORY_MODE,
+            .value = CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY};
+        launchAttr[num_attrs] = attr;
+        ++num_attrs;
+      }
+    }
 
     if (launch_pdl != 0) {
       CUlaunchAttribute pdlAttr = {
@@ -1038,12 +1191,14 @@ bool extractTmaDesc(void *ptr, PyObject *obj) {
     return false;
   }
   *((CUtensorMap *)ptr) = ((PyCUtensorMapObject *)obj)->tensorMap;
-  uintptr_t align_128 = (uintptr_t)ptr & (128 - 1);
-  if (align_128 != 0) {
+  // Depending on the cuda version, alignof(CUtensorMap) may be 64 or 128.
+  size_t alignment = alignof(CUtensorMap);
+  uintptr_t remainder = (uintptr_t)ptr & (alignment - 1);
+  if (remainder != 0) {
     PyErr_Format(
         PyExc_ValueError,
-        "CUtensorMap must be aligned to 128B, but got (&map) mod 128 = %ld",
-        align_128);
+        "CUtensorMap must be aligned to %ld, but got (&map) mod %ld = %ld",
+        alignment, alignment, remainder);
     return false;
   }
   return true;
@@ -1389,8 +1544,20 @@ cleanup:
 static PyMethodDef ModuleMethods[] = {
     {"load_binary", loadBinary, METH_VARARGS,
      "Load provided cubin into CUDA driver"},
+    {"unload_module", unloadModule, METH_VARARGS,
+     "Unload provided module to free memory"},
+    {"get_device_capability", getDeviceCapability, METH_VARARGS,
+     "Get compute capability (major, minor) for a given device"},
     {"get_device_properties", getDeviceProperties, METH_VARARGS,
      "Get the properties for a given device"},
+    {"get_current_device", getCurrentDevice, METH_VARARGS,
+     "Get the current CUDA device index"},
+    {"set_current_device", setCurrentDevice, METH_VARARGS,
+     "Set the current CUDA device index"},
+    {"get_default_stream", getDefaultStream, METH_VARARGS,
+     "Get the CUDA default stream for torch-free launches"},
+    {"is_stream_capturing", isStreamCapturing, METH_VARARGS,
+     "Check whether a CUDA stream is being captured"},
     {"cuOccupancyMaxActiveClusters", occupancyMaxActiveClusters, METH_VARARGS,
      "Python interface for cuOccupancyMaxActiveClusters function"},
     {"set_printf_fifo_size", setPrintfFifoSize, METH_VARARGS,

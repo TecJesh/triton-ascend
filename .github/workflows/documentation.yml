@@ -11,6 +11,8 @@ on:
   # Manual full scans (checkAll) to surface errors in existing docs
   # that incremental PR runs never touch. These never block a PR.
   workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *"
 
 permissions:
   contents: read
@@ -25,6 +27,10 @@ jobs:
     runs-on: linux-amd64-cpu-8-hk
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
+    timeout-minutes: 60
+    env:
+      PYTHON: "python3"
+
     steps:
       - name: Checkout branch
         uses: actions/checkout@v6

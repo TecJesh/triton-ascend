@@ -3,6 +3,7 @@ import tracemalloc
 import pytest
 import pathlib
 import os
+import numpy as np
 
 import torch
 import triton
@@ -151,7 +152,7 @@ def test_multiple_hooks() -> None:
     {"enable_fp_fusion": False},
     {"extern_libs": {}},
 ])
-def test_launch_with_options(options) -> None:
+def test_launch_with_options(options, monkeypatch) -> None:
     if "extern_libs" in options:
         # copied from tutorials/07-extern-functions.py
         current_dir = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
@@ -177,8 +178,8 @@ def test_launch_with_options(options) -> None:
     def kernel(x):
         pass
 
-    triton.knobs.runtime.jit_post_compile_hook = compile_info_hook
-    triton.knobs.runtime.jit_cache_hook = cache_hook
+    monkeypatch.setattr(triton.knobs.runtime, "jit_post_compile_hook", compile_info_hook)
+    monkeypatch.setattr(triton.knobs.runtime, "jit_cache_hook", cache_hook)
 
     # run first without options
     kernel[(1, 1, 1)](6)
@@ -201,9 +202,6 @@ def test_launch_with_options(options) -> None:
             assert compile_info[option_key] == tuple(option_val.items())
     else:
         assert compile_info[option_key] == option_val
-
-    triton.knobs.runtime.jit_post_compile_hook = None
-    triton.knobs.runtime.jit_cache_hook = None
 
 
 @pytest.mark.interpreter
@@ -229,3 +227,13 @@ def test_pre_run_hooks(device):
     a = torch.ones(n_elements, device=device, dtype=torch.int32)
     add_kernel.run(a, n_elements, grid=(1, ), warmup=False)
     assert torch.all(a == 2)
+
+
+def test_interpreter_implicit_cvt_bool() -> None:
+    from triton.runtime.interpreter import _implicit_cvt
+
+    value = _implicit_cvt(True)
+
+    assert value.dtype == tl.int1
+    assert value.handle.data.dtype == np.bool_
+    assert bool(value.handle.data[0]) is True

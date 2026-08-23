@@ -709,9 +709,6 @@ static void fuseOneLevel(LoopNestNode *parent, mlir::DominanceInfo &domInfo) {
   Value curI = fused.getRegionIterArg(1);
   Value i;
 
-  auto lenInnersIt =
-      ValueRange(fused.getRegionIterArgs()).begin() + lenInnersStartIdx;
-
   ArrayRef<BlockArgument> ivars = fused.getRegionIterArgs().slice(ivarStartIdx);
   auto bodyOutsIt =
       ValueRange(fused.getRegionIterArgs()).begin() + innerOutsStartIdx;
@@ -1011,17 +1008,22 @@ static void fuseOneLevel(LoopNestNode *parent, mlir::DominanceInfo &domInfo) {
   // Update the parent's loop to the fused loop. Set the new stage count to the
   // max stage count of the inner loops.
   int numStages = 1;
-  if (auto stageAttr = outer->getAttrOfType<IntegerAttr>(kNumStagesAttrName))
+  bool hasNumStages = false;
+  if (auto stageAttr = outer->getAttrOfType<IntegerAttr>(kNumStagesAttrName)) {
+    hasNumStages = true;
     numStages = stageAttr.getInt();
+  }
   for (InnerLoop &loop : innerLoops) {
     if (auto stageAttr =
-            loop.op->getAttrOfType<IntegerAttr>(kNumStagesAttrName))
+            loop.op->getAttrOfType<IntegerAttr>(kNumStagesAttrName)) {
+      hasNumStages = true;
       numStages = std::max<int>(numStages, stageAttr.getInt());
+    }
     loop.op.erase();
   }
   outer.erase();
   parent->loop = fused;
-  if (numStages > 1)
+  if (hasNumStages)
     fused->setAttr(kNumStagesAttrName, b.getI32IntegerAttr(numStages));
 }
 
@@ -1180,7 +1182,7 @@ static LogicalResult speculateInnerLoopLength(scf::ForOp outerLoop,
 
   // Move the loop nest into the `else` branch.
   outerLoop.replaceAllUsesWith(ifOp.getResults());
-  Block *block = b.createBlock(&ifOp.getElseRegion());
+  b.createBlock(&ifOp.getElseRegion());
   outerLoop->remove();
   b.insert(outerLoop);
   scf::YieldOp::create(b, outerLoop.getResults());
