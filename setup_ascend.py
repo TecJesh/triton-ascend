@@ -1,5 +1,6 @@
 import glob
 import importlib.util
+import json
 import os
 import platform
 import re
@@ -7,6 +8,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import python.build_helpers as build_helpers
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -79,13 +82,47 @@ def _get_ascend_llvm_package_info(base_dir):
     else:
         return None
 
-    llvm_hash_path = base_dir / "cmake" / "llvm-hash.txt"
-    rev = llvm_hash_path.read_text()[:8]
+    # Upstream replaced cmake/llvm-hash.txt with cmake/llvm-info.json.
+    llvm_info_path = base_dir / "cmake" / "llvm-info.json"
+    with open(llvm_info_path, "r") as llvm_info_file:
+        llvm_info = json.load(llvm_info_file)
+    rev = llvm_info["llvm_hash"][:8]
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
     url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
     return {"name": name, "sym_name": sym_name, "url": url}
+
+
+def _resolve_ascend_llvm_syspath(mod):
+    """Resolve the Ascend LLVM package dir to hand to CMake as LLVM_SYSPATH.
+
+    Upstream now resolves third-party packages inside CMake by running
+    python/build_helpers.py as a subprocess.  That subprocess imports
+    build_helpers fresh from disk, so the in-memory get_llvm_package_info
+    override patched onto the build_helpers module has no effect there.
+    Resolve the Ascend LLVM package in-process instead (downloading and
+    extracting it if needed) and return its directory; the caller passes it
+    as -DLLVM_SYSPATH so the CMake-side resolution reuses it.
+    """
+    helper_args = build_helpers.BuildHelperArgs(
+        cache_path=mod.get_triton_cache_path(),
+        offline_build=mod.is_offline_build(),
+        llvm_system_suffix=os.environ.get("TRITON_LLVM_SYSTEM_SUFFIX") or None,
+        llvm_syspath=os.environ.get("LLVM_SYSPATH") or None,
+        json_syspath=os.environ.get("JSON_SYSPATH") or None,
+        ptxas_path=None,
+        ptxas_blackwell_path=None,
+        cuobjdump_path=None,
+        nvdisasm_path=None,
+        cudacrt_path=None,
+        cudart_path=None,
+        cupti_include_path=None,
+        cupti_lib_path=None,
+        cupti_lib_blackwell_path=None,
+    )
+    cmake_vars = build_helpers.get_thirdparty_cmake_vars(["llvm"], helper_args)
+    return cmake_vars.get("LLVM_SYSPATH")
 
 
 def _apply_patch(patch_path, *, directory=None, cwd=None):
@@ -107,6 +144,23 @@ def _checkout_file(files, *, cwd=None):
                                                                                                          or _THIS_DIR))
     except subprocess.CalledProcessError:
         raise RuntimeError(f"init code failed, list:{files}")
+
+
+def _normalize_crlf(files, *, cwd=None):
+    """Convert CRLF line endings to LF in *files* (in-place).
+
+    The sync workflow regenerates the npuir adapter patch via a text-mode
+    round-trip, so the patch always carries LF line endings, while some
+    npuir sources (e.g. the root CMakeLists.txt) are CRLF at HEAD.
+    `git apply` matches context lines literally, so a CRLF working tree
+    would reject the LF patch. CMake and mlir-tblgen parse LF fine.
+    """
+    base = Path(str(cwd or _THIS_DIR))
+    for f in files:
+        path = base / f
+        data = path.read_bytes()
+        if b"\r\n" in data:
+            path.write_bytes(data.replace(b"\r\n", b"\n"))
 
 
 def _is_dev_mode():
@@ -142,17 +196,22 @@ def _get_triton_ascend_patch_file():
 
 
 def _get_npuir_patch_files():
-    return [
-        "CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td",
-        "bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td",
-        "bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td",
-        "bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt",
-        "bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp",
-        "bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp",
-    ]
+    """Files the npuir adapter patch touches, parsed from its diff headers.
+
+    The patch gains new sections as LLVM-23 fixes accumulate; deriving the
+    list from the patch keeps the pre-apply restore in sync automatically.
+    A stale hardcoded list left previously patched files dirty in the tree
+    and made the next `git apply` fail on their hunks.
+    """
+    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    files = []
+    with open(os.path.join(_THIS_DIR, patch_path), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("diff --git a/"):
+                target = line.split(" b/", 1)[-1].rstrip("\n")
+                if target != "/dev/null":
+                    files.append(target)
+    return files
 
 
 def _apply_npuir_patch():
@@ -163,8 +222,49 @@ def _apply_npuir_patch():
         raise RuntimeError(f"patch({patch_path}) not found.")
     if not os.path.isdir(npuir_dir):
         raise RuntimeError(f"AscendNPU-IR not found at {npuir_dir}")
-    _checkout_file(_get_npuir_patch_files(), cwd=npuir_dir)
+    patch_files = _get_npuir_patch_files()
+    if not patch_files:
+        raise RuntimeError(f"patch({patch_path}) has no file sections.")
+    # Restore only files tracked at HEAD; new-file sections are created
+    # fresh by `git apply` and have nothing to check out.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--"] + patch_files,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=npuir_dir,
+        text=True,
+    ).stdout.splitlines()
+    _checkout_file(tracked, cwd=npuir_dir)
+    _normalize_crlf(tracked, cwd=npuir_dir)
     _apply_patch(patch_path, directory=npuir_dir)
+
+
+def _get_gsan_patch_files():
+    return ["third_party/nvidia/CMakeLists.txt"]
+
+
+def _apply_gsan_patch():
+    """Gate the NVIDIA GSan runtime build (TRITON_GSAN_DISABLE).
+
+    The Ascend LLVM package is built without clang
+    (LLVM_ENABLE_PROJECTS=mlir;llvm;lld), so upstream's REQUIRED
+    find_program(TRITON_GSAN_CLANGXX) fails cmake configure.  The patch
+    makes the GSan runtime optional; it is reverted after the build so
+    the vendor file never lingers modified in the tree.
+    """
+    patch_path = os.path.join("third_party", "ascend", "patch", "triton-ascend-gsan-3.7.0.patch")
+    if not os.path.isfile(patch_path):
+        return
+    _checkout_file(_get_gsan_patch_files())
+    _apply_patch(patch_path)
+
+
+def _restore_gsan_patch():
+    try:
+        _checkout_file(_get_gsan_patch_files())
+    except RuntimeError:
+        pass
 
 
 def _apply_triton_ascend_patch():
@@ -179,13 +279,16 @@ def _apply_triton_ascend_patch():
         _checkout_file(patch_files)
         _apply_patch(str(patch))
     _apply_npuir_patch()
+    _apply_gsan_patch()
 
 
 def _get_default_version():
     version_file = _THIS_DIR / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
-    return "3.6.0-dev"
+    # Fallback tracks the upstream Triton version (3.8.0 since this sync);
+    # version.txt is authoritative when present.
+    return "3.8.0-dev"
 
 
 def _get_version(is_manylinux, get_git_commit_hash):
@@ -355,13 +458,16 @@ def _patch_module(mod):
     ascend_backend = mod.BackendInstaller.prepare("ascend")
     mod.backends = [ascend_backend, *mod.backends]
 
-    # 2. Replace LLVM package info with Ascend build.
-    _orig_get_llvm_package_info = mod.get_llvm_package_info
+    # 2. Replace LLVM package info with Ascend build.  Upstream moved
+    #    Package/get_llvm_package_info from setup.py into python/build_helpers.py
+    #    (new signature: get_llvm_package_info(helper_args)), so patch the
+    #    build_helpers module instead of the setup module.
+    _orig_get_llvm_package_info = build_helpers.get_llvm_package_info
 
-    def get_llvm_package_info():
+    def get_llvm_package_info(helper_args):
         info = _get_ascend_llvm_package_info(Path(mod.get_base_dir()))
         if info is not None:
-            return mod.Package(
+            return build_helpers.Package(
                 "llvm",
                 info["name"],
                 info["url"],
@@ -370,9 +476,9 @@ def _patch_module(mod):
                 "LLVM_SYSPATH",
                 sym_name=info["sym_name"],
             )
-        return _orig_get_llvm_package_info()
+        return _orig_get_llvm_package_info(helper_args)
 
-    mod.get_llvm_package_info = get_llvm_package_info
+    build_helpers.get_llvm_package_info = get_llvm_package_info
 
     # 3. Patch CMakeBuild to apply Ascend patch / coverage / tools.
     _OrigCMakeBuild = mod.CMakeBuild
@@ -407,8 +513,11 @@ def _patch_module(mod):
             else:
                 _clean_hitest_env()
 
-            for ext in self.extensions:
-                self.build_extension(ext)
+            try:
+                for ext in self.extensions:
+                    self.build_extension(ext)
+            finally:
+                _restore_gsan_patch()
 
         def build_extension(self, ext):
             extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
@@ -421,8 +530,24 @@ def _patch_module(mod):
             else:
                 asc_extra_args.append("-DTRITON_BUILD_TD=OFF")
 
+            # Upstream no longer passes LLVM paths from setup.py; CMake resolves
+            # them by invoking python/build_helpers.py as a subprocess, which
+            # cannot see the in-memory get_llvm_package_info override.  Resolve
+            # the Ascend LLVM package here and pass its path via LLVM_SYSPATH.
+            ascend_llvm_syspath = _resolve_ascend_llvm_syspath(mod)
+            if ascend_llvm_syspath:
+                asc_extra_args.append("-DLLVM_SYSPATH=" + ascend_llvm_syspath)
+            # Upstream now passes its TRITON_VERSION to CMake (Version.h);
+            # pass the Ascend wheel version instead so the compiled version
+            # matches the wheel.
+            asc_extra_args.append("-DTRITON_VERSION=" + _get_version(mod._ascend_is_manylinux, mod.get_git_commit_hash))
+
             def patched_check_call(cmd, *args, **kwargs):
-                if (isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "cmake" and "--build" not in cmd):
+                # Only the cmake configure invocation takes extra -D args;
+                # leave `cmake --build` and the new `cmake --install`
+                # (wheel_headers component) untouched.
+                if (isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "cmake" and "--build" not in cmd
+                        and "--install" not in cmd):
                     cmd = list(cmd) + asc_extra_args
                 return orig_check_call(cmd, *args, **kwargs)
 
@@ -440,6 +565,12 @@ def _patch_module(mod):
     is_manylinux = mod.check_env_flag("IS_MANYLINUX", "FALSE")
 
     class BuildWheel(bdist_wheel):
+
+        def get_tag(self):
+            # Port of upstream plugin_bdist_wheel.get_tag() (TRITON_STABLE_ABI).
+            if mod.check_env_flag("TRITON_STABLE_ABI"):
+                return "cp312", "abi3", super().get_tag()[2]
+            return super().get_tag()
 
         def run(self):
             mod.add_links(external_only=True)

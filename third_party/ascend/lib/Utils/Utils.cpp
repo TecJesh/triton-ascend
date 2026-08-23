@@ -486,10 +486,6 @@ static std::optional<Value> getRootPointer(Value ptr) {
                 [](auto op) -> std::optional<Value> { return op.getPtr(); })
             .Case<triton::SplatOp>(
                 [](auto op) -> std::optional<Value> { return op.getSrc(); })
-            .Case<triton::MakeTensorPtrOp>(
-                [](auto op) -> std::optional<Value> { return op.getBase(); })
-            .Case<triton::AdvanceOp>(
-                [](auto op) -> std::optional<Value> { return op.getPtr(); })
             .Case<memref::ReinterpretCastOp>(
                 [](auto op) -> std::optional<Value> { return op.getSource(); })
             .Case<memref::SubViewOp>(

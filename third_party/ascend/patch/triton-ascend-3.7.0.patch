@@ -2,32 +2,32 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
 index 43e33fbc80..d45302902e 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -15,15 +15,24 @@ include(CTest)
- 
+@@ -14,15 +14,24 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
  
 +# Security compilation options settings
 +include(${CMAKE_CURRENT_SOURCE_DIR}/safe_compile.cmake)
 +
- # Options
+ ################################################################################
+ # Triton configuration
+ ################################################################################
+ 
  option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
  option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
 +option(TRITON_BUILD_TD "Build Triton Distributed" OFF)
+ option(TRITON_STABLE_ABI "Build with Python Stable ABI (abi3) for Python 3.12+" OFF)
  option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
  option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
- option(LLVM_BUILD_SHARED_LIBS
-   "Build all libraries as shared libraries instead of static" OFF)
+ option(TRITON_OFFLINE_BUILD "Build without downloading dependencies" OFF)
+ option(TRITON_EXT_ENABLED "Build with default visibility for Triton+LLVM symbol exposure to plugin extensions" OFF)
  set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
- 
 +if(TRITON_BUILD_TD)
 +  set(TRITON_USE_ASCEND ON)
 +  add_compile_definitions(TRITON_USE_ASCEND=1)
 +endif()
 +
- if(TRITON_BUILD_WITH_CCACHE)
-   find_program(CCACHE_PROGRAM ccache)
-   if(CCACHE_PROGRAM)
-@@ -132,6 +141,21 @@ function(add_triton_library name)
+ set(TRITON_VERSION "" CACHE STRING "Triton version string (passed from setup.py)")
+@@ -258,6 +267,21 @@ function(add_triton_library name)
    set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
    add_triton_object(${name} ${ARGN})
    target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
@@ -49,19 +49,28 @@ index 43e33fbc80..d45302902e 100644
  endfunction()
  
  set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
-@@ -144,7 +168,7 @@ endfunction()
- # Disable warnings that show up in external code (gtest;pybind11)
+@@ -274,15 +274,15 @@ endfunction(add_triton_plugin)
+ # Disable warnings that show up in external code (gtest;nanobind)
  if(NOT MSVC)
    set(TRITON_DISABLE_EH_RTTI_FLAGS "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
--  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
-+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -Wno-deprecated-declarations -fvisibility=hidden")
+   if(NOT TRITON_EXT_ENABLED)
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+   else()
+     # Inform plugin loader if that libtriton is compiled with visibility
+     # so that they will not proceed with loading plugins if that will
+     # crash a Triton not compiled with visibility due to missing symbols.
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTRITON_EXT_ENABLED=1")
+   endif()
+-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default ")
++  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -Wno-deprecated-declarations")
  else()
    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
  endif()
-@@ -168,6 +192,32 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
+@@ -303,7 +303,33 @@ add_subdirectory(lib)
+ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
    link_libraries(stdc++fs)
  endif()
- 
+
 +# Adapter LLVM VERSION For AscendNPU IR
 +option(LLVM_MAJOR_VERSION_21_COMPATIBLE "NPUIR build with LLVM 21 or later" OFF)
 +if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
@@ -88,34 +97,52 @@ index 43e33fbc80..d45302902e 100644
 +  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
 +  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
 +endif()
- 
- # -----
- 
-@@ -180,11 +230,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
+ ################################################################################
+ # Python module
+ ################################################################################
+@@ -317,29 +317,39 @@ if(TRITON_BUILD_PYTHON_MODULE)
    # Python Interpreter is used to run lit tests
    find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
-   find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+   # nanobind expects find_package(Python) which sets Python::Module target
+   # and Python_* variables. Triton uses find_package(Python3) instead.
+   # Bridge the two by aliasing the target and forwarding variables.
+   if(NOT TARGET Python::Interpreter)
+     add_executable(Python::Interpreter ALIAS Python3::Interpreter)
+   endif()
+   if(NOT TARGET Python::Module)
+     add_library(Python::Module ALIAS Python3::Module)
+     set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
+     set(Python_INCLUDE_DIRS "${Python3_INCLUDE_DIRS}")
+     set(Python_SOABI "${Python3_SOABI}")
+     set(Python_VERSION "${Python3_VERSION}")
+     set(Python_INTERPRETER_ID "${Python3_INTERPRETER_ID}")
+   endif()
+
+   find_package(nanobind CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+   nanobind_build_library(nanobind-static)
+   if(TRITON_STABLE_ABI)
+     target_compile_definitions(nanobind-static PUBLIC Py_LIMITED_API=0x030C0000)
+   endif()
+   target_link_libraries(nanobind-static PRIVATE Python3::Module)
 +  # need to include pybind11
 +  include_directories(${Python3_INCLUDE_DIRS})
 +  include_directories(${pybind11_INCLUDE_DIR})
 +  link_directories(${Python3_LIBRARY_DIRS})
 +  link_libraries(${Python3_LIBRARIES})
 +  add_link_options(${Python3_LINK_OPTIONS})
- 
+
    foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
      add_subdirectory(third_party/${CODEGEN_BACKEND})
    endforeach()
- 
+
 +  if(TRITON_BUILD_TD)
 +    list(APPEND TRITON_PLUGIN_NAMES "distributed")
 +  endif()
 +
    if (TRITON_BUILD_PROTON)
-     add_subdirectory(third_party/proton)
-   endif()
-@@ -343,6 +403,12 @@ endif()
+@@ -523,5 +523,11 @@ add_subdirectory(third_party/proton/Dialect)
  find_package(Threads REQUIRED)
- 
+
  add_subdirectory(third_party/f2reduce)
 +
 +# To enable the hitest coverage tool, you need to set the environment variable TRITON_ENABLE_COVERAGE_HITEST=1
@@ -125,7 +152,6 @@ index 43e33fbc80..d45302902e 100644
 +
  add_subdirectory(bin)
  add_subdirectory(test)
- add_subdirectory(examples)
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
 index 885cffb78e..14bf4e8526 100644
 --- a/bin/CMakeLists.txt
@@ -285,7 +311,7 @@ index a7d60d5dff..a51e8e36b3 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -90,6 +119,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -93,7 +93,20 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -302,13 +328,14 @@ index a7d60d5dff..a51e8e36b3 100644
 +  mlir::triton::cfg::registerTritonToGraphPasses();
 +  mlir::triton::registerBubbleUpOperationPass();
 +
+   mlir::triton::registerSetMinimumSharedMemoryPass();
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
-   mlir::NVVM::registerInlinerInterface(registry);
-@@ -146,6 +188,21 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+   mlir::registerLLVMDILocalVariable();
+@@ -150,8 +150,23 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
- 
+
 +  // DynamicCVPipeline passes
 +  mlir::triton::registerAddDynamicCVPipelinePasses();
 +  mlir::triton::registerPreCheckAvailablePasses();
@@ -324,9 +351,11 @@ index a7d60d5dff..a51e8e36b3 100644
 +  mlir::triton::registerRefineArgsBlockIdPasses();
 +  mlir::triton::registerSeparateMemoryFromComputePasses();
 +
-   // Plugin passes
-   if (std::string filename =
-           mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+   // Register plugin passes and dialects.
+   for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
+     plugin.registerPasses();
+     plugin.registerDialects(registry);
+   }
 @@ -180,10 +237,17 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
        mlir::triton::gpu::TritonGPUDialect,
        mlir::triton::instrument::TritonInstrumentDialect,
@@ -515,9 +544,10 @@ index 3ffb904574..d0df0fbf82 100644
              self.semantic = TritonSemantic(self.builder)
  
          self.name_loc_as_prefix = None
-@@ -293,6 +312,17 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -313,7 +313,18 @@ class CodeGenerator(ast.NodeVisitor):
          self.begin_line = begin_line - 1
-         self.builder.set_loc(file_name, begin_line, 0)
+         self.begin_col = begin_col
+         self.builder.set_loc(file_name, begin_line, begin_col)
          self.builder.options = options
 +
 +        # Set up unified builder interface with methods from specialized builders
@@ -533,10 +563,10 @@ index 3ffb904574..d0df0fbf82 100644
          # dict of functions provided by the backend. Below are the list of possible functions:
          # Convert custom types not natively supported on HW.
          # convert_custom_types(input_tensor, dtype, fp_downcast_rounding=None, _builder=None)
-@@ -438,17 +468,19 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -459,17 +459,19 @@ class CodeGenerator(ast.NodeVisitor):
          self.lscope[name] = value
          self.local_defs[name] = value
- 
+
 -    def _get_insertion_point_and_loc(self):
 +    def _get_insertion_point_and_loc(self, builder=None):
          # XXX: this is a hack to get the location of the insertion point.
@@ -548,7 +578,7 @@ index 3ffb904574..d0df0fbf82 100644
 +        loc = _builder.get_loc()
 +        ip = _builder.get_insertion_point()
          return ip, loc
- 
+
 -    def _set_insertion_point_and_loc(self, ip, loc):
 -        self.builder.restore_insertion_point(ip)
 -        self.builder.set_loc(loc)
@@ -556,9 +586,9 @@ index 3ffb904574..d0df0fbf82 100644
 +        _builder = self.builder if not builder else builder
 +        _builder.restore_insertion_point(ip)
 +        _builder.set_loc(loc)
- 
-     def _find_carries(self, node, liveins, ignore: set[str] = set()):
-         # create loop body block
+
+     @contextlib.contextmanager
+     def _discovering_loop_carries(self):
 @@ -1010,6 +1042,26 @@ class CodeGenerator(ast.NodeVisitor):
                  return self.visit(node.orelse)
  
@@ -691,12 +721,14 @@ index d6f8dd26fe..eb61008092 100644
              for file in asm_files
          })
          self.metadata_group = metadata_group
-@@ -466,7 +491,7 @@ class CompiledKernel:
+@@ -480,9 +480,9 @@ class CompiledKernel:
+         if knobs.runtime.kernel_load_start_hook is not None:
              knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
 -            self.name, self.kernel, self.metadata.shared, device)
 +            self.metadata.kernel_name, self.kernel, self.metadata.shared, device, self.metadata.mix_mode)
+         self._module_pid = os.getpid()
          warp_size = driver.active.get_current_target().warp_size
          if self.metadata.num_warps * warp_size > self.n_max_threads:
              raise_(OutOfResources(self.metadata.num_warps * warp_size, self.n_max_threads, "threads"))
@@ -748,14 +780,14 @@ index 582cd876cb..13ff1cef09 100644
              return fn(*args, **kwargs)
  
          return check
-@@ -92,7 +96,7 @@ def umulhi(x, y, _semantic=None):
- 
- 
+@@ -92,7 +92,7 @@ def umulhi(x, y, _semantic=None):
+
+
+ @core._tensor_member_fn
  @core.builtin
 -@_check_dtype(dtypes=["fp32", "fp64"])
 +@_check_dtype(dtypes=["fp16", "fp32", "fp64"])
  @_add_math_1arg_docstr("exponential")
- @core._tensor_member_fn
  def exp(x, _semantic=None):
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
 index 691c471296..d70d629d49 100644
@@ -848,8 +880,8 @@ index 691c471296..d70d629d49 100644
          return self.invert(input)
  
      def lshr(self, input: TensorTy, other: TensorTy) -> TensorTy:
-@@ -474,14 +516,22 @@ class TritonSemantic(Generic[TensorTy]):
- 
+@@ -472,16 +472,24 @@ class TritonSemantic(Generic[TensorTy]):
+
      def minus(self, input: TensorTy) -> TensorTy:
          input_sca_ty = input.type.scalar
 +        if hasattr(input, 'was_bool_to_int8'):
@@ -857,9 +889,11 @@ index 691c471296..d70d629d49 100644
 +                raise TypeError("unexpected type bool")
          if input_sca_ty.is_ptr():
              raise ValueError("wrong type argument to unary minus (" + input_sca_ty.__repr__() + ")")
+         if input_sca_ty.is_floating():
+             return self.tensor(self.builder.create_fneg(input.handle), input.type)
          _0 = self.tensor(self.builder.get_null_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
          return self.sub(_0, input, True)
- 
+
      def invert(self, input: TensorTy) -> TensorTy:
 +        if hasattr(input, 'was_bool_to_int8'):
 +            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
@@ -886,19 +920,10 @@ index 691c471296..d70d629d49 100644
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)
-@@ -1019,6 +1072,8 @@ class TritonSemantic(Generic[TensorTy]):
-         # Check `boundary_check` argument
-         boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
- 
-+        if boundary_check and padding is None:
-+            padding = ir.PADDING_OPTION.PAD_ZERO
-         # Build IR
-         return self.tensor(
-             self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
-@@ -1036,7 +1091,12 @@ class TritonSemantic(Generic[TensorTy]):
-             raise ValueError("`padding_option` or `boundary_check` argument is not supported for loading a tensor of"
-                              "pointers or loading a scalar. Because the compiler does not know the boundary; please "
-                              "use block pointers (defined by `make_block_ptr`) instead")
+@@ -997,7 +997,12 @@ class TritonSemantic(Generic[TensorTy]):
+         # Check `mask` and `other` arguments
+         if mask is None and other is not None:
+             raise ValueError("`other` cannot be provided without `mask`")
 -
 +        if mask is not None and other is None:
 +            # Get element type to determine default padding value
@@ -909,8 +934,8 @@ index 691c471296..d70d629d49 100644
          # For a pointer of scalar, check the type of `mask` and `other`
          if not ptr.type.is_block():
              if mask and mask.type.is_block():
-@@ -1075,13 +1135,19 @@ class TritonSemantic(Generic[TensorTy]):
- 
+@@ -1036,13 +1036,19 @@ class TritonSemantic(Generic[TensorTy]):
+
          # Build IR
          if mask is None:
 -            ret = self.tensor(self.builder.create_load(ptr.handle, cache, eviction, is_volatile), dst_ty)
@@ -932,8 +957,8 @@ index 691c471296..d70d629d49 100644
 +            ret.was_bool_to_int8 = True
 +
          return ret
- 
-     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
+
+     def descriptor_load(self, desc: tl.tensor_descriptor_base, offsets, cache_modifier: str,
 @@ -1847,12 +1913,17 @@ class TritonSemantic(Generic[TensorTy]):
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
@@ -1169,3 +1194,4 @@ index ba21a58e19..67aded02e3 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
+

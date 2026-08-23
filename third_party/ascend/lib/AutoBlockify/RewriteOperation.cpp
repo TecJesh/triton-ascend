@@ -178,11 +178,9 @@ void PropagateUnrealizedCastDown::rewriteLoad(UnrealizedConversionCastOp op,
             resType, rewriter.getZeroAttr(getElementTypeOrSelf(res))));
   }
   mask = createMask(mask, uccMask, resType.getShape(), rewriter);
-  auto boundaryCheck = llvm::map_to_vector(loadOp.getBoundaryCheck(),
-                                           [](int32_t idx) { return idx + 1; });
   auto newOp = rewriter.create<triton::LoadOp>(
-      loadOp.getLoc(), ptr, mask, other, boundaryCheck, loadOp.getPadding(),
-      loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile());
+      loadOp.getLoc(), ptr, mask, other, loadOp.getCache(), loadOp.getEvict(),
+      loadOp.getIsVolatile());
   for (auto attr : loadOp->getAttrs()) {
     if (!newOp->hasAttr(attr.getName()))
       newOp->setAttr(attr.getName(), attr.getValue());
@@ -199,11 +197,9 @@ void PropagateUnrealizedCastDown::rewriteStore(
   auto mask = rewriteValue(storeOp.getMask(), op, rewriter);
   auto ptrShape = cast<RankedTensorType>(ptr.getType()).getShape();
   mask = createMask(mask, uccMask, ptrShape, rewriter);
-  auto boundaryCheck = llvm::map_to_vector(storeOp.getBoundaryCheck(),
-                                           [](int32_t idx) { return idx + 1; });
-  auto newOp = rewriter.create<triton::StoreOp>(
-      storeOp.getLoc(), ptr, value, mask, boundaryCheck, storeOp.getCache(),
-      storeOp.getEvict());
+  auto newOp =
+      rewriter.create<triton::StoreOp>(storeOp.getLoc(), ptr, value, mask,
+                                       storeOp.getCache(), storeOp.getEvict());
   for (auto attr : storeOp->getAttrs()) {
     if (!newOp->hasAttr(attr.getName()))
       newOp->setAttr(attr.getName(), attr.getValue());

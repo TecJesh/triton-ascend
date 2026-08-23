@@ -97,16 +97,11 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   MemOpTransformer tf(MemOpTransformer::MemType::load);
 
   Value newPtr = nullptr;
-  if (oldPtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    newPtr = tf.createNewTensorPtr(oldPtr, loc, rewriter);
-  } else if (oldPtr.getDefiningOp<triton::AdvanceOp>()) {
-    newPtr = tf.createNewAdvancePtr(oldPtr, loc, rewriter);
-  } else if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
+  if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
     newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
   } else {
     InFlightDiagnostic diag = emitWarning(loc)
-                              << "PtrAnalysis: only MakeTensorPtrOp, "
-                                 "AdvanceOp, and AddPtrOp are supported.";
+                              << "PtrAnalysis: only AddPtrOp is supported.";
     return success();
   }
   if (!tf.ptrState.isPermuted) {
@@ -129,11 +124,9 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     return failure();
   }
 
-  auto newBoundaryCheck = tf.getBoundaryCheck(op.getBoundaryCheck());
-
-  auto loadOp = rewriter.create<triton::LoadOp>(
-      loc, newPtr, newMask, newOther, newBoundaryCheck, op.getPadding(),
-      op.getCache(), op.getEvict(), op.getIsVolatile());
+  auto loadOp = rewriter.create<triton::LoadOp>(loc, newPtr, newMask, newOther,
+                                                op.getCache(), op.getEvict(),
+                                                op.getIsVolatile());
   loadOp->setAttr(ImplicitPermuteHandledTAG,
                   UnitAttr::get(rewriter.getContext()));
 
@@ -153,16 +146,11 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
 
   MemOpTransformer tf(MemOpTransformer::MemType::store);
   Value newPtr = nullptr;
-  if (oldPtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    newPtr = tf.createNewTensorPtr(oldPtr, loc, rewriter);
-  } else if (oldPtr.getDefiningOp<triton::AdvanceOp>()) {
-    newPtr = tf.createNewAdvancePtr(oldPtr, loc, rewriter);
-  } else if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
+  if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
     newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
   } else {
     InFlightDiagnostic diag = emitWarning(loc)
-                              << "PtrAnalysis: only MakeTensorPtrOp, "
-                                 "AdvanceOp, and AddPtrOp are supported.";
+                              << "PtrAnalysis: only AddPtrOp is supported.";
     return success();
   }
   if (!tf.ptrState.isPermuted) {
@@ -185,11 +173,8 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
 
   auto permuteResult = tf.materializeImplicitPermute(oldValue, loc, rewriter);
 
-  auto newBoundaryCheck = tf.getBoundaryCheck(op.getBoundaryCheck());
-
-  auto storeOp = rewriter.create<triton::StoreOp>(loc, newPtr, permuteResult,
-                                                  newMask, newBoundaryCheck,
-                                                  op.getCache(), op.getEvict());
+  auto storeOp = rewriter.create<triton::StoreOp>(
+      loc, newPtr, permuteResult, newMask, op.getCache(), op.getEvict());
   storeOp->setAttr(ImplicitPermuteHandledTAG,
                    UnitAttr::get(rewriter.getContext()));
 
@@ -372,66 +357,6 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc,
   return ptrState.createAddPtrOp(rewriter, loc);
 }
 
-Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
-                                           PatternRewriter &rewriter) {
-  TritonToStructured::PtrAnalysis ptrAnalysis;
-  auto makeTPtrOp = oldPtr.getDefiningOp<triton::MakeTensorPtrOp>();
-  if (!makeTPtrOp) {
-    InFlightDiagnostic diag = emitWarning(loc)
-                              << "PtrAnalysis: load pointer must originate "
-                                 "from 'make_tensor_ptr' operation";
-    return oldPtr;
-  }
-  if (ptrAnalysis.visitOperandMakeTensorPtr(makeTPtrOp, ptrState, loc, rewriter)
-          .failed()) {
-    ptrState.isPermuted = false;
-    return oldPtr;
-  }
-  ptrState.analyzePermute();
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "After ptrState.analyzePermute:\n";
-    llvm::dbgs() << "compileOn91095Flag: " << compileOn91095Flag << "\n";
-    ptrState.dump();
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
-  return ptrState.createMakeTensorPtrOp(rewriter, loc);
-}
-
-Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
-                                            PatternRewriter &rewriter) {
-  TritonToStructured::PtrAnalysis ptrAnalysis;
-  auto advOp = oldPtr.getDefiningOp<triton::AdvanceOp>();
-  if (!advOp) {
-    emitWarning(loc)
-        << "PtrAnalysis: pointer must originate from 'advance' operation";
-    return oldPtr;
-  }
-
-  Value basePtr = advOp.getPtr();
-  if (!basePtr || !basePtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    emitWarning(loc) << "PtrAnalysis: advance base ptr must originate from "
-                        "'make_tensor_ptr' operation";
-    return oldPtr;
-  }
-  auto newBasePtr = createNewTensorPtr(basePtr, loc, rewriter);
-  if (!newBasePtr)
-    return oldPtr;
-
-  if (!ptrState.isPermuted)
-    return oldPtr;
-  // 2) Rewrite advance offsets according to the new make_tensor_ptr layout.
-  auto oldOffsets = advOp.getOffsets();
-  SmallVector<Value> newOffsets;
-  size_t rank = ptrState.order.size();
-  // iterate reversed safely: i = rank-1, ..., 0
-  for (size_t i = rank; i-- > 0;) {
-    newOffsets.push_back(oldOffsets[ptrState.order[i]]);
-  }
-  return rewriter.create<triton::AdvanceOp>(loc, newBasePtr.getType(),
-                                            newBasePtr, newOffsets);
-}
-
 Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
                                       PatternRewriter &rewriter) {
   if (!oldMask)
@@ -580,42 +505,6 @@ Value MemOpTransformer::createNewOther(Value oldOther, const Location loc,
       loc, targetShapeType, oldOther, targetShapeValue);
 
   return reshapeOp.getResult();
-}
-
-// Remap boundary_check for block ptr implicit permute.
-// Formula
-// - newAxis = rank - 1 - position(oldAxis in ptrState.order)
-// Rules implemented
-// - ptrState.order records original axes in memory-priority order.
-// - createMakeTensorPtrOp rebuilds the new block ptr from
-// reverse(ptrState.order),
-//   so the rebuilt ptr is canonicalized to descending order [rank-1, ..., 0].
-// - So each old boundary_check axis must be translated into the axis index
-//   of the rewritten block ptr before creating the new load/store.
-// Examples
-// - order=[1,0], boundary_check=[0] => [0]
-// - order=[0,1], boundary_check=[0,1] => [1,0]
-// - order=[2,0,1], boundary_check=[0,2] => [1,2]
-SmallVector<int32_t>
-MemOpTransformer::getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const {
-  SmallVector<int32_t> newBoundaryCheck(oldBoundaryCheck.begin(),
-                                        oldBoundaryCheck.end());
-  if (!ptrState.isPermuted || !ptrState.isBlockPtr() ||
-      newBoundaryCheck.empty()) {
-    return newBoundaryCheck;
-  }
-
-  int32_t rank = static_cast<int32_t>(ptrState.order.size());
-  for (auto &boundaryAxis : newBoundaryCheck) {
-    auto pos = llvm::find(ptrState.order, static_cast<size_t>(boundaryAxis));
-    if (pos == ptrState.order.end()) {
-      continue;
-    }
-    boundaryAxis =
-        rank - 1 -
-        static_cast<int32_t>(std::distance(ptrState.order.begin(), pos));
-  }
-  return newBoundaryCheck;
 }
 
 bool MemOpTransformer::applyPermuteOnMask() {

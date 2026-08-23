@@ -108,20 +108,11 @@ public:
   Value createNewAddPtr(Value oldPtr, const Location loc,
                         PatternRewriter &rewriter);
 
-  Value createNewAdvancePtr(Value oldPtr, const Location loc,
-                            PatternRewriter &rewriter);
-
-  Value createNewTensorPtr(Value oldPtr, const Location loc,
-                           PatternRewriter &rewriter);
-
   Value createNewMask(Value oldPtr, const Location loc,
                       PatternRewriter &rewriter);
 
   Value createNewOther(Value oldOther, const Location loc,
                        PatternRewriter &rewriter);
-
-  SmallVector<int32_t>
-  getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const;
 
   bool applyPermuteOnMask();
 };

@@ -106,5 +106,31 @@ def _apply_ascend_patch():
         TritonSemantic.dot = _patched_dot
         TritonSemantic._ascend_dot_patch_applied = True
 
+    # Patch TritonSemantic.histogram: upstream now enforces a 32-bit integer
+    # input contract (triton-lang/triton#10891), but the Ascend backend also
+    # supports 64-bit integer histogram inputs (bin indices are narrowed to
+    # i32 during lowering).  Restore the pre-#10891 "any integer dtype"
+    # behavior for Ascend so int64/uint64 histograms keep working.
+    if not getattr(TritonSemantic, "_ascend_histogram_patch_applied", False):
+        _original_histogram = TritonSemantic.histogram
+
+        def _patched_histogram(self, input, num_bins, mask):
+            if input.dtype.is_int() and input.dtype.int_bitwidth != 32:
+                # Pre-#10891 body, kept for Ascend-only wide integer inputs.
+                import triton.language as tl
+
+                assert len(input.shape) == 1, "histogram only supports 1D input"
+                if mask is not None:
+                    mask = self.broadcast_impl_shape(mask, input.shape)
+                    if not mask.type.scalar.is_bool():
+                        raise ValueError("Mask must have boolean scalar type")
+                    mask = mask.handle
+                return self.tensor(self.builder.create_histogram(input.handle, num_bins, mask),
+                                   tl.block_type(tl.int32, [num_bins]))
+            return _original_histogram(self, input, num_bins, mask)
+
+        TritonSemantic.histogram = _patched_histogram
+        TritonSemantic._ascend_histogram_patch_applied = True
+
 
 __all__ = ["do_bench_npu"]

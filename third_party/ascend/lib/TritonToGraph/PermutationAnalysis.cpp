@@ -49,6 +49,16 @@ static_assert(kComposeBefore[kComposeAfter[0]] == 0 &&
               "Permutation::compose applies the left operand before the "
               "right operand");
 
+// Upstream removed triton::isTensorPointerType together with block pointers
+// ("block pointer is python-only"): a scalar !tt.ptr whose pointee is a
+// tensor can no longer appear in the IR. Keep the predicate local so the
+// guards that used the removed helper stay valid.
+static bool isTensorPointerType(Type type) {
+  if (auto ptrType = dyn_cast<triton::PointerType>(type))
+    return isa<RankedTensorType>(ptrType.getPointeeType());
+  return false;
+}
+
 struct ParsedRankOneOffset {
   ProofOutcome outcome;
   triton::MakeRangeOp range;
@@ -417,13 +427,11 @@ bool isBarrierLike(Operation *operation) {
 // move across a delayed store, so retain the direct-access subset accepted by
 // StaticAccessAnalysis before taking the ABI no-alias fast path.
 bool isSupportedInterveningLoad(triton::LoadOp load) {
-  return !load.getMask() && !load.getOther() &&
-         load.getBoundaryCheck().empty() && !load.getPadding() &&
-         !load.getIsVolatile();
+  return !load.getMask() && !load.getOther() && !load.getIsVolatile();
 }
 
 bool isSupportedInterveningStore(triton::StoreOp store) {
-  return !store.getMask() && store.getBoundaryCheck().empty();
+  return !store.getMask();
 }
 
 } // namespace
@@ -687,8 +695,7 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
 
   auto pointerElement =
       dyn_cast<triton::PointerType>(pointerType.getElementType());
-  if (!pointerElement ||
-      triton::isTensorPointerType(pointerType.getElementType()))
+  if (!pointerElement || isTensorPointerType(pointerType.getElementType()))
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerType));
 
@@ -706,8 +713,7 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerForm));
   Type baseType = baseSplat.getSrc().getType();
-  if (!isa<triton::PointerType>(baseType) ||
-      triton::isTensorPointerType(baseType))
+  if (!isa<triton::PointerType>(baseType) || isTensorPointerType(baseType))
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerForm));
 
@@ -878,8 +884,6 @@ StaticAccessProof StaticAccessAnalysis::analyzeLoad(triton::LoadOp load) const {
     return rejectAccess(ProofOutcome::rejected(ProofReason::NullOperation));
   if (load.getMask() || load.getOther())
     return rejectAccess(ProofOutcome::rejected(ProofReason::MaskedAccess));
-  if (!load.getBoundaryCheck().empty() || load.getPadding())
-    return rejectAccess(ProofOutcome::rejected(ProofReason::BoundaryCheck));
   if (load.getIsVolatile())
     return rejectAccess(ProofOutcome::rejected(ProofReason::VolatileLoad));
   return analyzePointer(load.getPtr());
@@ -891,8 +895,6 @@ StaticAccessAnalysis::analyzeStore(triton::StoreOp store) const {
     return rejectAccess(ProofOutcome::rejected(ProofReason::NullOperation));
   if (store.getMask())
     return rejectAccess(ProofOutcome::rejected(ProofReason::MaskedAccess));
-  if (!store.getBoundaryCheck().empty())
-    return rejectAccess(ProofOutcome::rejected(ProofReason::BoundaryCheck));
   return analyzePointer(store.getPtr());
 }
 

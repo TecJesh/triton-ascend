@@ -270,7 +270,7 @@ class LibEntry(triton.KernelInterface):
                 k_args[param_names[i]] = arg
                 dns_args.append(hashable_arg)
             else:
-                if major_version == 3 and 3 <= minor_version <= 6:
+                if major_version == 3 and minor_version >= 3:
                     k_args[param_names[i]] = arg
                 const_args.append(hashable_arg)
         for p in self.jit_function.params[len(args):]:
@@ -283,7 +283,7 @@ class LibEntry(triton.KernelInterface):
 
             if p.is_constexpr:
                 const_args.append(val)
-                if major_version == 3 and 3 <= minor_version <= 6:
+                if major_version == 3 and minor_version >= 3:
                     k_args[p.name] = val
             elif p.do_not_specialize:
                 dns_args.append(val)
@@ -349,26 +349,26 @@ class LibEntry(triton.KernelInterface):
             grid = grid(meta)
         grid = grid + (1, 1)
 
-        if major_version == 3 and 3 <= minor_version <= 6:
-            all_args = []
-            missing_keys = []
-            for key in list(self.signature.parameters.keys()):
-                if key in k_args:
-                    all_args.append(k_args[key])
-                elif key in tune_constexprs:
-                    all_args.append(tune_constexprs[key])
-                elif key in heur_constexprs:
-                    all_args.append(heur_constexprs[key])
-                elif key in constexprs:
-                    all_args.append(constexprs[key])
-                else:
-                    missing_keys.append(key)
-                if len(missing_keys):
-                    raise RuntimeError(
-                        f"[libentry]: probably a bug, the following kernel params where not captured: {missing_keys}")
-            kernel[grid[0:3]](*all_args)
-        else:
-            kernel[grid[0:3]](*k_args.values())
+        # The NPU launcher stub is generated from the kernel's full parameter
+        # list, so every parameter (including constexpr ones) must be passed
+        # positionally in signature order, for all triton versions.
+        all_args = []
+        missing_keys = []
+        for key in list(self.signature.parameters.keys()):
+            if key in k_args:
+                all_args.append(k_args[key])
+            elif key in tune_constexprs:
+                all_args.append(tune_constexprs[key])
+            elif key in heur_constexprs:
+                all_args.append(heur_constexprs[key])
+            elif key in constexprs:
+                all_args.append(constexprs[key])
+            else:
+                missing_keys.append(key)
+        if missing_keys:
+            raise RuntimeError(
+                f"[libentry]: probably a bug, the following kernel params where not captured: {missing_keys}")
+        kernel[grid[0:3]](*all_args)
         return kernel, constexprs
 
 

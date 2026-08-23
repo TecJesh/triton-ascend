@@ -47,6 +47,16 @@ using namespace cfg;
 
 namespace {
 
+// Upstream removed triton::isTensorPointerType together with block pointers
+// ("block pointer is python-only"): a scalar !tt.ptr whose pointee is a
+// tensor can no longer appear in the IR. Keep the predicate local so the
+// guards that used the removed helper stay valid.
+static bool isTensorPointerType(Type type) {
+  if (auto ptrType = dyn_cast<triton::PointerType>(type))
+    return isa<RankedTensorType>(ptrType.getPointeeType());
+  return false;
+}
+
 struct StoreCandidate {
   Operation *operation;
   StaticAccess access;
@@ -168,7 +178,7 @@ bool hasExpectedStoreTypes(const StoreCandidate &candidate) {
 
   auto pointerElement =
       dyn_cast<triton::PointerType>(candidate.pointerType.getElementType());
-  if (!pointerElement || triton::isTensorPointerType(pointerElement) ||
+  if (!pointerElement || isTensorPointerType(pointerElement) ||
       pointerElement.getPointeeType() != candidate.pointeeType ||
       candidate.valueType.getElementType() != candidate.pointeeType)
     return false;
@@ -184,8 +194,7 @@ bool hasExpectedStoreTypes(const StoreCandidate &candidate) {
 
 std::optional<StoreCandidate>
 matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
-  if (!isDirectFunctionBodyStore(store, function, block) || store.getMask() ||
-      !store.getBoundaryCheck().empty())
+  if (!isDirectFunctionBodyStore(store, function, block) || store.getMask())
     return std::nullopt;
 
   auto pointerType = dyn_cast<RankedTensorType>(store.getPtr().getType());
@@ -196,7 +205,7 @@ matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
 
   auto pointerElement =
       dyn_cast<triton::PointerType>(pointerType.getElementType());
-  if (!pointerElement || triton::isTensorPointerType(pointerElement) ||
+  if (!pointerElement || isTensorPointerType(pointerElement) ||
       pointerElement.getPointeeType() != valueType.getElementType() ||
       pointerType.getShape() != valueType.getShape() ||
       pointerType.getEncoding() != valueType.getEncoding())

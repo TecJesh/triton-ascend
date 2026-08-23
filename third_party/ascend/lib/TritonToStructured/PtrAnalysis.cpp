@@ -275,48 +275,6 @@ LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
   return state.addState(ptrState, offsetState, addptrOp, builder);
 }
 
-LogicalResult
-PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTPtrOp,
-                                       PtrState &state, const Location loc,
-                                       OpBuilder &builder) {
-  if (!state.isEmpty()) {
-    makeTPtrOp.emitError(
-        "PtrAnalysis: PtrState should be empty when visiting make_tensor_ptr");
-    return failure();
-  }
-  if (makeTPtrOp.getOrder().empty()) {
-    LLVM_DEBUG(makeTPtrOp->emitRemark(
-        "PtrAnalysis: expect tt.make_tensor_ptr to have order field set"));
-    return failure();
-  }
-
-  // Build:
-  //   - stateInfo: per-dimension (stride, shape, dimIndex) of the parent tensor
-  //   - sizes: original tensor shape of the block
-  //   - dimOffsets: the offset to the block in the parent tensor
-  state.source = makeTPtrOp.getBase();
-  state.dimOffsets = makeTPtrOp.getOffsets();
-  state.order = SmallVector<size_t>(makeTPtrOp.getOrder());
-
-  auto resType = cast<triton::PointerType>(makeTPtrOp.getResult().getType());
-  auto pointeeType = cast<ShapedType>(resType.getPointeeType());
-  auto pointeeShape = pointeeType.getShape();
-  const int64_t rank = pointeeType.getRank();
-
-  SmallVector<StateInfo> newStateInfo;
-  for (int64_t i = 0; i < rank; i++) {
-    state.sizes.push_back(builder.getIndexAttr(pointeeShape[i]));
-    newStateInfo.emplace_back(makeTPtrOp.getStrides()[i],
-                              makeTPtrOp.getShape()[i], i);
-  }
-  state.stateInfo = newStateInfo;
-
-  assert(state.isBlockPtr() &&
-         "tt.make_tensor_ptr pointer state should describe a block pointer");
-
-  return success();
-}
-
 bool PtrAnalysis::operandIsScalar(Value operand) {
   auto tensorType = dyn_cast<mlir::RankedTensorType>(operand.getType());
   auto elementType =
@@ -380,11 +338,6 @@ LogicalResult PtrAnalysis::initStateByPointer(Value operand, PtrState &state,
                                 builder);
     } else if (auto bitCastOp = dyn_cast<triton::BitcastOp>(op)) {
       newSource = operand;
-    } else if (auto makeTensorOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
-      LLVM_DEBUG({
-        op->emitWarning("Unexpected operand defining operation tts.make_tptr.");
-      });
-      return failure();
     } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
       newSource = operand;
     } else {
@@ -699,52 +652,6 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
   auto addptrOp = builder.create<triton::AddPtrOp>(loc, ptrTensorType, splatPtr,
                                                    rangeAfterAdd);
   return addptrOp;
-}
-
-triton::MakeTensorPtrOp PtrState::createMakeTensorPtrOp(OpBuilder &builder,
-                                                        Location loc) {
-  SmallVector<Value> newShape;
-  SmallVector<Value> newStrides;
-  SmallVector<Value> newOffsets;
-  SmallVector<int32_t> newBlkShape;
-  SmallVector<int32_t> newOrder; // must be int32_t for MakeTensorPtrOp builder
-
-  const size_t rank = order.size();
-  if (rank == 0) {
-    emitError(loc) << "PtrAnalysis: empty order in createMakeTensorPtrOp";
-    return nullptr;
-  }
-
-  // iterate reversed safely: i = rank-1, ..., 0
-  for (size_t i = rank; i-- > 0;) {
-    size_t dim = order[i];
-
-    if (dim >= stateInfo.size() || dim >= dimOffsets.size() ||
-        dim >= sizes.size()) {
-      emitError(loc)
-          << "PtrAnalysis: invalid dim index in createMakeTensorPtrOp";
-      return nullptr;
-    }
-
-    auto info = stateInfo[dim];
-
-    newShape.push_back(materializeValue(builder, loc, info.shape));
-    newStrides.push_back(materializeValue(builder, loc, info.stride));
-    newOffsets.push_back(materializeValue(builder, loc, dimOffsets[dim]));
-
-    auto blkSzOpt = getIntAttr(sizes[dim]);
-    if (!blkSzOpt.has_value()) {
-      emitError(loc) << "PtrAnalysis: dynamic block_shape is not supported for "
-                        "tt.make_tensor_ptr";
-      return nullptr;
-    }
-    newBlkShape.push_back(static_cast<int32_t>(blkSzOpt.value()));
-    newOrder.push_back(static_cast<int32_t>(i));
-  }
-
-  return builder.create<triton::MakeTensorPtrOp>(
-      loc, source, ValueRange(newShape), ValueRange(newStrides),
-      ValueRange(newOffsets), newBlkShape, newOrder);
 }
 
 LogicalResult PtrAnalysis::visitOperandMul(arith::MulIOp mulOp, PtrState &state,

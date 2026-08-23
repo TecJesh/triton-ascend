@@ -103,7 +103,8 @@ public:
     if (auto ptrType = mlir::dyn_cast<triton::PointerType>(type)) {
       // 地址空间1通常是全局内存
       // 需要根据具体硬件进行调整
-      return ptrType.getAddressSpace() == 1 || ptrType.getAddressSpace() == 0;
+      return ptrType.getAddressSpace() == triton::PtrAddrSpace::Global ||
+             ptrType.getAddressSpace() == triton::PtrAddrSpace::Descriptor;
     }
     return false;
   }
@@ -142,9 +143,6 @@ private:
 
   // 分析addptr操作
   void analyzeAddPtrOp(mlir::triton::AddPtrOp addptrOp);
-
-  // 分析make_tensor_ptr操作
-  void analyzeMakeTensorPtrOp(mlir::triton::MakeTensorPtrOp op);
 
   // 分析load操作
   void analyzeLoadOp(mlir::triton::LoadOp loadOp);

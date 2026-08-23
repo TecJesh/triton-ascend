@@ -156,18 +156,6 @@ public:
   }
 };
 
-/*
- * Rewrite tt.make_tensor_ptr with non-contiguous order to
- * tt.make_tensor_ptr + tt.load + tt.trans.
- */
-class MakeTensorPtrCanonicalizer
-    : public OpRewritePattern<triton::MakeTensorPtrOp> {
-public:
-  using OpRewritePattern<triton::MakeTensorPtrOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(triton::MakeTensorPtrOp op,
-                                PatternRewriter &rewriter) const override;
-};
-
 class ReduceSingleCanonicalizer : public OpRewritePattern<triton::ReduceOp> {
 public:
   using OpRewritePattern<triton::ReduceOp>::OpRewritePattern;
@@ -557,14 +545,6 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-class CatConverter : public OpConversionPattern<triton::CatOp> {
-public:
-  using OpConversionPattern<triton::CatOp>::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(triton::CatOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
-
 class GatherConverter : public OpConversionPattern<triton::GatherOp> {
 private:
   static constexpr llvm::StringRef gatherFuncNameBase = "triton_gather";
@@ -602,26 +582,6 @@ public:
     BlockDataParser::rewriteLoopOp(op, rewriter, known);
     return success();
   }
-};
-
-class AdvanceConverter : public OpConversionPattern<triton::AdvanceOp> {
-public:
-  using OpConversionPattern<triton::AdvanceOp>::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(triton::AdvanceOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
-
-class MakeTensorPtrConverter
-    : public OpConversionPattern<triton::MakeTensorPtrOp> {
-public:
-  using OpConversionPattern<triton::MakeTensorPtrOp>::OpConversionPattern;
-  explicit MakeTensorPtrConverter(MLIRContext *context)
-      : OpConversionPattern<triton::MakeTensorPtrOp>(context) {}
-
-  LogicalResult
-  matchAndRewrite(triton::MakeTensorPtrOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
 };
 
 class TransposeConverter : public OpConversionPattern<triton::TransOp> {

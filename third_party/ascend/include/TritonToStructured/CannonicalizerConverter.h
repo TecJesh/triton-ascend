@@ -78,22 +78,6 @@ public:
                                 PatternRewriter &rewriter) const override;
 };
 
-// Rewrites `tt.load %bptr` whose `%bptr = tt.make_tensor_ptr ...` has all
-// statically zero strides. The zero strides are the IR-level signature of a
-// broadcasted tensor: every element of the loaded block refers to the same
-// memory location `base`. Lower the load into a single scalar `tt.load %base`
-// followed by `tt.broadcast` back to the original block shape, so downstream
-// passes see only standard ops.
-class ZeroStrideMakeTensorPtrConverter
-    : public OpRewritePattern<triton::MakeTensorPtrOp> {
-public:
-  explicit ZeroStrideMakeTensorPtrConverter(MLIRContext *context)
-      : OpRewritePattern<triton::MakeTensorPtrOp>(context) {}
-
-  LogicalResult matchAndRewrite(triton::MakeTensorPtrOp op,
-                                PatternRewriter &rewriter) const override;
-};
-
 class IfYieldAddHoistConverter : public OpRewritePattern<scf::IfOp> {
 public:
   explicit IfYieldAddHoistConverter(MLIRContext *context)
@@ -139,10 +123,6 @@ private:
     Value offsetValue; // Offset value used in addptr operation
     Value newIterArg;  // New integer iteration argument
     Value addPtrValue; // The addptr operation result that updates the pointer
-    // Offset value used in advancePtr operation (with explicit inlined
-    // capacity)
-    SmallVector<Value> offsetValues;
-    SmallVector<Value> newInitArgs;
     SmallVector<Type> newIterArgTypes;
   };
 
@@ -236,58 +216,6 @@ private:
   Value reconstructPointer(scf::ForOp forOp, unsigned idx, Value intResult,
                            ArrayRef<PointerArgInfo> pointerArgs,
                            PatternRewriter &rewriter) const;
-
-  LogicalResult matchAndRewriteAdvancePtr(scf::ForOp forOp,
-                                          PatternRewriter &rewriter) const;
-
-  SmallVector<PointerArgInfo>
-  collectPointerIterArgsForAdvancePtr(scf::ForOp forOp) const;
-
-  std::optional<PointerArgInfo>
-  analyzePointerIterArgForAdvancePtr(Value iterArg, Block &loopBody) const;
-
-  std::tuple<SmallVector<Value>, SmallVector<Type>,
-             DenseMap<unsigned, unsigned>>
-  createNewIterArgsForAdvancePtr(scf::ForOp forOp,
-                                 SmallVector<PointerArgInfo> &pointerArgs,
-                                 PatternRewriter &rewriter) const;
-
-  IRMapping
-  createIRMappingForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
-                               SmallVector<PointerArgInfo> &pointerArgs,
-                               DenseMap<unsigned, unsigned> &indexMap,
-                               PatternRewriter &rewriter) const;
-
-  Value rebuildPointerForAdvancePtr(scf::ForOp forOp,
-                                    ArrayRef<PointerArgInfo> pointerArgs,
-                                    unsigned idx,
-                                    PatternRewriter &rewriter) const;
-
-  SmallVector<Value>
-  createOffsetsForAdvancePtr(unsigned idx, ArrayRef<PointerArgInfo> pointerArgs,
-                             DenseMap<unsigned, unsigned> &indexMap,
-                             PatternRewriter &rewriter) const;
-
-  LogicalResult cloneInstructionsForAdvancePtr(
-      Block &oldBody, Block &newBody, ArrayRef<PointerArgInfo> pointerArgs,
-      DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
-      PatternRewriter &rewriter) const;
-
-  LogicalResult
-  rewriteLoopBodyForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
-                               SmallVector<PointerArgInfo> &pointerArgs,
-                               DenseMap<unsigned, unsigned> &indexMap,
-                               PatternRewriter &rewriter) const;
-
-  LogicalResult cloneYieldOpForAdvancePtr(
-      scf::YieldOp yieldOp, ArrayRef<PointerArgInfo> pointerArgs,
-      DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
-      PatternRewriter &rewriter) const;
-
-  SmallVector<Value>
-  reconstructPointerForAdvance(scf::ForOp forOp, unsigned idx, Value intResult,
-                               ArrayRef<PointerArgInfo> pointerArgs,
-                               PatternRewriter &rewriter) const;
 };
 
 class SimplifyTensorIterArgsPattern : public OpRewritePattern<scf::ForOp> {

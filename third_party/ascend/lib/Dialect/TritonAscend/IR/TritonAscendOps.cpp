@@ -10,7 +10,7 @@
 #include "ascend/include/Utils/Utils.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
-#include "triton/Tools/Sys/GetEnv.hpp"
+#include "triton/Tools/Sys/GetEnv.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstdint>
 
@@ -46,7 +46,7 @@ void StrideLoadOp::getEffects(
 LogicalResult
 DotOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
                         ValueRange operands, DictionaryAttr attributes,
-                        OpaqueProperties properties, RegionRange regions,
+                        PropertyRef properties, RegionRange regions,
                         SmallVectorImpl<Type> &inferredReturnTypes) {
   DotOpAdaptor adaptor(operands, attributes, properties, regions);
   auto aTy = dyn_cast<RankedTensorType>(adaptor.getA().getType());
@@ -110,7 +110,7 @@ LogicalResult DotOp::verify() {
 //-- IndexSelectSimdOp --
 LogicalResult IndexSelectSimdOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    DictionaryAttr attributes, PropertyRef properties, RegionRange regions,
     SmallVectorImpl<Type> &inferredReturnTypes) {
 
   // Get operands using adaptor
@@ -155,7 +155,7 @@ LogicalResult IndexSelectSimdOp::inferReturnTypes(
 LogicalResult
 FlipOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
                          ValueRange operands, DictionaryAttr attributes,
-                         OpaqueProperties properties, RegionRange regions,
+                         PropertyRef properties, RegionRange regions,
                          SmallVectorImpl<Type> &inferredReturnTypes) {
   auto inputTy = dyn_cast<RankedTensorType>(operands[0].getType());
   if (!inputTy) {
@@ -172,7 +172,7 @@ FlipOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
 LogicalResult
 SortOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
                          ValueRange operands, DictionaryAttr attributes,
-                         OpaqueProperties properties, RegionRange regions,
+                         PropertyRef properties, RegionRange regions,
                          SmallVectorImpl<Type> &inferredReturnTypes) {
   if (operands.size() != 1) {
     return emitOptionalError(location,
@@ -254,7 +254,7 @@ LogicalResult Conv1dOp::verify() {
 
 LogicalResult Conv1dOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    DictionaryAttr attributes, PropertyRef properties, RegionRange regions,
     SmallVectorImpl<Type> &inferredReturnTypes) {
   Conv1dOpAdaptor adaptor(operands, attributes, properties, regions);
 

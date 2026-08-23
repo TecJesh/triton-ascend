@@ -77,27 +77,6 @@ Descriptor unpackDescriptor(TensorDescType type, Value desc,
   return res;
 }
 
-SmallVector<int32_t> computeOrder(ArrayRef<int64_t> shape) {
-  SmallVector<int32_t> order;
-  int rank = shape.size();
-  order.reserve(rank);
-  // default by [dims - 1, ..., 0]
-  for (int i = rank - 1; i >= 0; --i) {
-    order.push_back(i);
-  }
-  return order;
-}
-
-DenseI32ArrayAttr getFullBoundaryCheckAttr(ConversionPatternRewriter &rewriter,
-                                           ArrayRef<int64_t> shape) {
-  SmallVector<int32_t> boundaryCheck;
-  boundaryCheck.reserve(shape.size());
-  for (int32_t dim = 0; dim < static_cast<int32_t>(shape.size()); ++dim) {
-    boundaryCheck.push_back(dim);
-  }
-  return rewriter.getDenseI32ArrayAttr(boundaryCheck);
-}
-
 Value expandOffsets(OpBuilder &builder, Location loc,
                     ArrayRef<int64_t> blockShape, Value offsets, unsigned dim) {
   Value expandedResult = offsets;
@@ -248,28 +227,31 @@ LogicalResult DescriptorLoadConverter::matchAndRewrite(
   auto loc = op.getLoc();
   const auto blockShape = op.getDesc().getType().getBlockType().getShape();
   auto descTy = op.getDesc().getType();
-  auto indices = op.getIndices();
 
   // 1. unpack descriptor
   auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
 
-  // 2. create make_tensor_ptr
-  SmallVector<int32_t> tensorShapeValues;
-  for (auto dim : blockShape) {
-    tensorShapeValues.push_back(static_cast<int32_t>(dim));
+  // 2. generate the pointer tensor and the full boundary mask from the
+  //    descriptor offsets (upstream removed make_tensor_ptr from the IR, so
+  //    descriptor loads are lowered to masked plain-pointer loads).
+  auto offsets = castToI64(rewriter, op.getIndices());
+  auto ptr = generatePtr(rewriter, loc, blockShape, desc, offsets);
+  auto mask = generateMask(rewriter, loc, blockShape, desc, offsets);
+
+  // 3. build the padding "other" value
+  auto elemType = descTy.getSignlessBlockType().getElementType();
+  TypedAttr padAttr = rewriter.getZeroAttr(elemType);
+  if (desc.padding.getValue() == triton::PaddingOption::PAD_NAN) {
+    auto floatTy = dyn_cast<FloatType>(elemType);
+    if (!floatTy)
+      return op->emitError("PAD_NAN requires a floating-point element type");
+    padAttr = rewriter.getFloatAttr(
+        elemType, llvm::APFloat::getNaN(floatTy.getFloatSemantics()));
   }
-  Value tensorPtr =
-      rewriter.create<triton::MakeTensorPtrOp>(loc,
-                                               desc.base,         // base
-                                               desc.shape,        // shape
-                                               desc.strides,      // strides
-                                               indices,           // offset
-                                               tensorShapeValues, // tensorShape
-                                               computeOrder(blockShape) // order
-      );
-  // 3. replace tt.load
-  auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
-  triton::PaddingOptionAttr padding = desc.padding;
+  auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
+  auto other = rewriter.create<triton::SplatOp>(
+      loc, descTy.getSignlessBlockType(), padVal);
+
   auto cache = triton::CacheModifierAttr::get(rewriter.getContext(),
                                               triton::CacheModifier::NONE);
   auto evict = triton::EvictionPolicyAttr::get(rewriter.getContext(),
@@ -283,11 +265,9 @@ LogicalResult DescriptorLoadConverter::matchAndRewrite(
   if (auto a = op->getAttrOfType<BoolAttr>("isVolatile"))
     isVolatile = a;
 
-  auto newLoad = rewriter.create<triton::LoadOp>(
-      loc, descTy.getSignlessBlockType(), tensorPtr,
-      Value(), // mask
-      Value(), // other
-      boundaryCheck, padding, cache, evict, isVolatile);
+  auto newLoad =
+      rewriter.create<triton::LoadOp>(loc, descTy.getSignlessBlockType(), ptr,
+                                      mask, other, cache, evict, isVolatile);
 
   rewriter.replaceOp(op, newLoad.getResult());
 
@@ -300,42 +280,19 @@ LogicalResult DescriptorStoreConverter::matchAndRewrite(
   auto loc = op.getLoc();
   const auto blockShape = op.getDesc().getType().getBlockType().getShape();
   auto descTy = op.getDesc().getType();
-  auto indices = op.getIndices();
 
   // 1. unpack descriptor
   auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
 
-  // 2. create make_tensor_ptr
-  SmallVector<int32_t> tensorShapeValues;
-  for (auto dim : blockShape) {
-    tensorShapeValues.push_back(static_cast<int32_t>(dim));
-  }
-  Value tensorPtr =
-      rewriter.create<triton::MakeTensorPtrOp>(loc,
-                                               desc.base,         // base
-                                               desc.shape,        // shape
-                                               desc.strides,      // strides
-                                               indices,           // offset
-                                               tensorShapeValues, // tensorShape
-                                               computeOrder(blockShape) // order
-      );
+  // 2. generate the pointer tensor and the full boundary mask from the
+  //    descriptor offsets (see DescriptorLoadConverter).
+  auto offsets = castToI64(rewriter, op.getIndices());
+  auto ptr = generatePtr(rewriter, loc, blockShape, desc, offsets);
+  auto mask = generateMask(rewriter, loc, blockShape, desc, offsets);
 
   // 3. replace tt.store
   Value valueToStore = adaptor.getSrc();
-
-  auto maskType = RankedTensorType::get(blockShape, rewriter.getI1Type());
-  rewriter.create<arith::ConstantOp>(loc,
-                                     DenseElementsAttr::get(maskType, true));
-  auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
-  auto cacheModifier = triton::CacheModifierAttr::get(
-      rewriter.getContext(), triton::CacheModifier::NONE);
-  auto evictionPolicy = triton::EvictionPolicyAttr::get(
-      rewriter.getContext(), triton::EvictionPolicy::NORMAL);
-
-  auto newStore = rewriter.create<triton::StoreOp>(loc, tensorPtr, valueToStore,
-                                                   Value(), // mask
-                                                   boundaryCheck, cacheModifier,
-                                                   evictionPolicy);
+  rewriter.create<triton::StoreOp>(loc, ptr, valueToStore, mask);
 
   rewriter.eraseOp(op);
   return success();
@@ -350,11 +307,6 @@ LogicalResult DescriptorScatterConverter::matchAndRewrite(
   const auto rowBlockShape = descTy.getSignlessBlockType().getShape();
 
   auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
-  SmallVector<int32_t> tensorShapeValues;
-  tensorShapeValues.reserve(rowBlockShape.size());
-  for (auto dim : rowBlockShape) {
-    tensorShapeValues.push_back(static_cast<int32_t>(dim));
-  }
 
   auto zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
   auto oneIndex = rewriter.create<arith::ConstantIndexOp>(loc, 1);
@@ -365,11 +317,6 @@ LogicalResult DescriptorScatterConverter::matchAndRewrite(
     rowUpperBound =
         rewriter.create<arith::ConstantIndexOp>(loc, srcType.getShape()[0]);
   }
-  auto rowBoundaryCheck = getFullBoundaryCheckAttr(rewriter, rowBlockShape);
-  auto cacheModifier = triton::CacheModifierAttr::get(
-      rewriter.getContext(), triton::CacheModifier::NONE);
-  auto evictionPolicy = triton::EvictionPolicyAttr::get(
-      rewriter.getContext(), triton::EvictionPolicy::NORMAL);
 
   auto loop = rewriter.create<scf::ForOp>(
       loc, zeroIndex, rowUpperBound, oneIndex, ValueRange{},
@@ -377,10 +324,12 @@ LogicalResult DescriptorScatterConverter::matchAndRewrite(
           ValueRange) {
         Value xOffset = nestedBuilder.create<tensor::ExtractOp>(
             nestedLoc, adaptor.getXOffsets(), ValueRange{rowIv});
-        Value tensorPtr = nestedBuilder.create<triton::MakeTensorPtrOp>(
-            nestedLoc, desc.base, desc.shape, desc.strides,
-            ValueRange{xOffset, adaptor.getYOffset()}, tensorShapeValues,
-            computeOrder(rowBlockShape));
+        SmallVector<Value> offsets =
+            castToI64(nestedBuilder, ValueRange{xOffset, adaptor.getYOffset()});
+        auto ptr =
+            generatePtr(nestedBuilder, nestedLoc, rowBlockShape, desc, offsets);
+        auto mask = generateMask(nestedBuilder, nestedLoc, rowBlockShape, desc,
+                                 offsets);
         SmallVector<OpFoldResult> extractOffsets{rowIv,
                                                  nestedBuilder.getIndexAttr(0)};
         SmallVector<OpFoldResult> extractSizes{
@@ -392,8 +341,7 @@ LogicalResult DescriptorScatterConverter::matchAndRewrite(
             nestedLoc, adaptor.getSrc(), extractOffsets, extractSizes,
             extractStrides);
         auto rowStore = nestedBuilder.create<triton::StoreOp>(
-            nestedLoc, tensorPtr, rowValue.getResult(), Value(),
-            rowBoundaryCheck, cacheModifier, evictionPolicy);
+            nestedLoc, ptr, rowValue.getResult(), mask);
         rowStore->setAttr(ConverterUtils::discreteAttrName,
                           nestedBuilder.getUnitAttr());
         nestedBuilder.create<scf::YieldOp>(nestedLoc);
@@ -424,17 +372,24 @@ LogicalResult DescriptorGatherConverter::matchAndRewrite(
   const auto rowBlockShape = descTy.getSignlessBlockType().getShape();
 
   auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
-  SmallVector<int32_t> tensorShapeValues;
-  tensorShapeValues.reserve(rowBlockShape.size());
-  for (auto dim : rowBlockShape) {
-    tensorShapeValues.push_back(static_cast<int32_t>(dim));
+
+  auto elemType = descTy.getSignlessBlockType().getElementType();
+  TypedAttr padAttr = rewriter.getZeroAttr(elemType);
+  if (desc.padding.getValue() == triton::PaddingOption::PAD_NAN) {
+    auto floatTy = dyn_cast<FloatType>(elemType);
+    if (!floatTy)
+      return op->emitError("PAD_NAN requires a floating-point element type");
+    padAttr = rewriter.getFloatAttr(
+        elemType, llvm::APFloat::getNaN(floatTy.getFloatSemantics()));
   }
+  auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
+  auto other = rewriter.create<triton::SplatOp>(
+      loc, descTy.getSignlessBlockType(), padVal);
 
   auto zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
   auto oneIndex = rewriter.create<arith::ConstantIndexOp>(loc, 1);
   Value rowUpperBound =
       rewriter.create<tensor::DimOp>(loc, adaptor.getXOffsets(), zeroIndex);
-  auto rowBoundaryCheck = getFullBoundaryCheckAttr(rewriter, rowBlockShape);
   auto cache = triton::CacheModifierAttr::get(rewriter.getContext(),
                                               triton::CacheModifier::NONE);
   auto evict = triton::EvictionPolicyAttr::get(rewriter.getContext(),
@@ -470,15 +425,15 @@ LogicalResult DescriptorGatherConverter::matchAndRewrite(
           ValueRange iterArgs) {
         Value xOffset = nestedBuilder.create<tensor::ExtractOp>(
             nestedLoc, adaptor.getXOffsets(), ValueRange{rowIv});
-        Value tensorPtr = nestedBuilder.create<triton::MakeTensorPtrOp>(
-            nestedLoc, desc.base, desc.shape, desc.strides,
-            ValueRange{xOffset, adaptor.getYOffset()}, tensorShapeValues,
-            computeOrder(rowBlockShape));
+        SmallVector<Value> offsets =
+            castToI64(nestedBuilder, ValueRange{xOffset, adaptor.getYOffset()});
+        auto ptr =
+            generatePtr(nestedBuilder, nestedLoc, rowBlockShape, desc, offsets);
+        auto mask = generateMask(nestedBuilder, nestedLoc, rowBlockShape, desc,
+                                 offsets);
         auto rowLoad = nestedBuilder.create<triton::LoadOp>(
-            nestedLoc, descTy.getSignlessBlockType(), tensorPtr,
-            Value(), // mask
-            Value(), // other
-            rowBoundaryCheck, desc.padding, cache, evict, isVolatile);
+            nestedLoc, descTy.getSignlessBlockType(), ptr, mask, other, cache,
+            evict, isVolatile);
         for (const auto &attr : filterSegmentSizes(op->getAttrs())) {
           if (!rowLoad->hasAttr(attr.getName())) {
             rowLoad->setAttr(attr.getName(), attr.getValue());

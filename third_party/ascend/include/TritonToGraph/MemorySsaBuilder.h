@@ -111,8 +111,8 @@ private:
 
   // 判断是否是创建指针的操作
   bool isPointerOp(Operation *op) const {
-    // 返回指针类型：addptr（偏移指针）、make_tensor_ptr（创建张量指针）
-    if (isa<triton::AddPtrOp, triton::MakeTensorPtrOp>(op))
+    // 返回指针类型：addptr（偏移指针）
+    if (isa<triton::AddPtrOp>(op))
       return true;
 
     if (isPointerBroadcastOrSplat(op))

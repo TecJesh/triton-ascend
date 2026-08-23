@@ -272,15 +272,6 @@ static Value getStrideLoadOtherScalar(triton::LoadOp op,
     return Value();
   }
 
-  if (op.getPadding().has_value() &&
-      op.getPadding().value() == triton::PaddingOption::PAD_NAN) {
-    auto floatTy = dyn_cast<FloatType>(elementType);
-    if (!floatTy)
-      return Value();
-    return rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getFloatAttr(
-                 elementType, APFloat::getNaN(floatTy.getFloatSemantics())));
-  }
   return rewriter.create<arith::ConstantOp>(loc,
                                             rewriter.getZeroAttr(elementType));
 }
@@ -510,155 +501,6 @@ getAddPtrStrideNumels(Operation *op, Value mask, RankedTensorType resultType,
   return numels;
 }
 
-static FailureOr<SmallVector<Value>> getBlockPtrStrideNumels(
-    Operation *op, Value mask, ArrayRef<int32_t> boundaryCheck,
-    triton::MakeTensorPtrOp mtpt, RankedTensorType resultType,
-    ArrayRef<Value> logicalOffsets, PatternRewriter &rewriter) {
-  auto loc = op->getLoc();
-  Value zero =
-      rewriter.create<arith::ConstantOp>(loc, rewriter.getI64IntegerAttr(0));
-  ArrayRef<int64_t> shape = resultType.getShape();
-  int64_t rank = resultType.getRank();
-  SmallVector<Value> numels;
-  numels.reserve(rank);
-
-  if (mask && rank != 1)
-    return failure();
-  Value prefixMaskNumel;
-  if (mask) {
-    prefixMaskNumel = getPrefixMaskNumel(op, mask, resultType, rewriter);
-    if (!prefixMaskNumel)
-      return failure();
-  }
-
-  for (int64_t d = 0; d < rank; ++d) {
-    Value block = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI64IntegerAttr(shape[d]));
-    Value numel = (d == 0 && prefixMaskNumel) ? prefixMaskNumel : block;
-
-    bool hasBoundaryCheck = false;
-    for (int32_t axis : boundaryCheck) {
-      if (axis == static_cast<int32_t>(d)) {
-        hasBoundaryCheck = true;
-        break;
-      }
-    }
-    if (hasBoundaryCheck) {
-      Value parentSize = ensureI64Scalar(mtpt.getShape()[d], loc, rewriter);
-      if (!parentSize)
-        return failure();
-      Value remaining =
-          rewriter.create<arith::SubIOp>(loc, parentSize, logicalOffsets[d]);
-      Value boundaryNumel = clampI64(remaining, zero, block, loc, rewriter);
-      numel = rewriter.create<arith::MinSIOp>(loc, numel, boundaryNumel);
-    }
-    numels.push_back(numel);
-  }
-
-  return numels;
-}
-
-// Expand a 1D tensor `v` of length `targetShape[axis]` into a rank-N tensor
-// with size `targetShape[axis]` at `axis` and size 1 elsewhere, then
-// broadcast to `targetShape`. Used to materialise the per-axis contribution
-// `arange(0, B_d) * stride_d` into the full N-D offset tensor.
-static Value expandAndBroadcastForAxis(Value v, int axis,
-                                       ArrayRef<int64_t> targetShape,
-                                       Type elementType, Location loc,
-                                       PatternRewriter &rewriter) {
-  Value cur = v;
-  int rank = static_cast<int>(targetShape.size());
-  for (int d = 0; d < rank; ++d) {
-    if (d == axis)
-      continue;
-    int curRank =
-        static_cast<int>(cast<RankedTensorType>(cur.getType()).getRank());
-    int expandAt = (d < axis) ? 0 : curRank;
-    cur = rewriter.create<triton::ExpandDimsOp>(loc, cur, expandAt);
-  }
-  auto targetTy = RankedTensorType::get(targetShape, elementType);
-  return rewriter.create<triton::BroadcastOp>(loc, targetTy, cur);
-}
-
-// Build the per-element OOB mask for block_ptr's boundary_check.
-// For each axis d in `boundaryCheck`:
-//   idx_d[i] = arange(0, B_d)[i] + effective_offset_d
-//   in_bounds_d[i] = (idx_d[i] >= 0) AND (idx_d[i] < parentShape[d])
-// Then broadcast each axis's mask to full `blockShape` and AND all together.
-// Returns a tensor<...xi1> of shape `blockShape`, or null if boundaryCheck
-// is empty.
-static Value buildBoundaryMask(Location loc, PatternRewriter &rewriter,
-                               ArrayRef<int64_t> blockShape,
-                               ArrayRef<int32_t> boundaryCheck,
-                               ArrayRef<Value> effectiveOffsetsI32,
-                               ValueRange parentShape) {
-  if (boundaryCheck.empty())
-    return Value();
-
-  auto i32Ty = rewriter.getIntegerType(32);
-  auto i64Ty = rewriter.getIntegerType(64);
-  auto i1Ty = rewriter.getIntegerType(1);
-
-  Value combined;
-  for (int32_t axisRaw : boundaryCheck) {
-    int axis = static_cast<int>(axisRaw);
-    int64_t blockD = blockShape[axis];
-
-    auto rangeTy32 = RankedTensorType::get({blockD}, i32Ty);
-    auto rangeTy64 = RankedTensorType::get({blockD}, i64Ty);
-
-    Value arange = rewriter.create<triton::MakeRangeOp>(
-        loc, rangeTy32, /*start=*/0, /*end=*/static_cast<int32_t>(blockD));
-    Value offSplat = rewriter.create<triton::SplatOp>(
-        loc, rangeTy32, effectiveOffsetsI32[axis]);
-    Value idx32 = rewriter.create<arith::AddIOp>(loc, arange, offSplat);
-    Value idx64 = rewriter.create<arith::ExtSIOp>(loc, rangeTy64, idx32);
-
-    Value shapeSplat =
-        rewriter.create<triton::SplatOp>(loc, rangeTy64, parentShape[axis]);
-    Value zeroDense = rewriter.create<arith::ConstantOp>(
-        loc, DenseElementsAttr::get(rangeTy64, llvm::APInt(64, 0)));
-    Value cmpLower = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, idx64, zeroDense);
-    Value cmpUpper = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::slt, idx64, shapeSplat);
-    Value axisMask = rewriter.create<arith::AndIOp>(loc, cmpLower, cmpUpper);
-
-    Value bcast = expandAndBroadcastForAxis(axisMask, axis, blockShape, i1Ty,
-                                            loc, rewriter);
-    combined =
-        combined
-            ? rewriter.create<arith::AndIOp>(loc, combined, bcast).getResult()
-            : bcast;
-  }
-  return combined;
-}
-
-// Build the padding "other" tensor for tt.indirect_load. Honours
-// PaddingOption::PAD_NAN for float element types; otherwise (including
-// PAD_ZERO or unspecified) returns a zero-splat tensor of `resultType`.
-// Returns null if PAD_NAN is requested but the element type is not float
-// (caller should treat as a hard failure).
-static Value buildPaddingOther(Location loc, PatternRewriter &rewriter,
-                               RankedTensorType resultType,
-                               std::optional<triton::PaddingOption> padding) {
-  Type elementType = resultType.getElementType();
-  Value padScalar;
-  if (padding.has_value() &&
-      padding.value() == triton::PaddingOption::PAD_NAN) {
-    auto floatTy = dyn_cast<FloatType>(elementType);
-    if (!floatTy)
-      return Value();
-    auto nan = llvm::APFloat::getNaN(floatTy.getFloatSemantics());
-    padScalar = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getFloatAttr(elementType, nan));
-  } else {
-    padScalar = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getZeroAttr(elementType));
-  }
-  return rewriter.create<triton::SplatOp>(loc, resultType, padScalar);
-}
-
 // AddPtr path: tt.load(tt.addptr(tt.splat(%scalar_ptr), %offsets)).
 // Uses PtrAnalysis (which has IR side effects), so this function must
 // stamp InspectedByStridedLoadStoreRewriteTAG on every "PtrAnalysis ran but
@@ -802,221 +644,6 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
   return success();
 }
 
-// Block-ptr path: tt.load(tt.make_tensor_ptr ...) or tt.load(tt.advance ...).
-// Unlike the AddPtr path this does NOT use PtrAnalysis -- strides come
-// directly from mtpt.getStrides() / order from mtpt.getOrder() -- so we
-// can decide everything before touching IR and just return failure() if
-// we don't want to rewrite.
-static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
-                                            triton::MakeTensorPtrOp mtpt,
-                                            triton::AdvanceOp advance,
-                                            RankedTensorType resultType,
-                                            PatternRewriter &rewriter) {
-  auto loc = op.getLoc();
-  auto i64Ty = rewriter.getIntegerType(64);
-  ArrayRef<int64_t> shape = resultType.getShape();
-  int64_t rank = static_cast<int64_t>(shape.size());
-
-  // ---- order must match the "non-permuted" layout: order[i] == rank-1-i,
-  //      i.e. innermost (fastest-changing) is the last dim of the tensor.
-  //      ImplicitPermute handles permuted layouts via tt.trans, so we
-  //      leave anything non-canonical alone.
-  auto order = mtpt.getOrder();
-  if (static_cast<int64_t>(order.size()) != rank)
-    return failure();
-  for (int64_t i = 0; i < rank; ++i) {
-    if (order[i] != rank - 1 - i) {
-      return failure();
-    }
-  }
-
-  // ---- stride check ----
-  auto strides = mtpt.getStrides();
-  if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
-    return failure();
-  // Stride dispatch: strided DMA on the MTE engine only supports power-of-two
-  // strides; a non-power-of-two stride would degrade to a slow scalar access.
-  // Dynamic strides stay on the structured SIMD path because they may be
-  // runtime stride 1 or power-of-two, where SIMT stride is slower. So we
-  // only rewrite to SIMT stride for *static non-power-of-two* strides:
-  //   stride 1 -> contiguous; stride 2 (even dim) -> deinterleave;
-  //   stride >= 4 (power of two) -> (compact) strided DMA.
-  APInt lastStrideC;
-  if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
-    return failure();
-  int64_t lastStride = std::abs(lastStrideC.getSExtValue());
-  if (lastStride <= 1)
-    return failure();
-  if (lastStride == 2)
-    return failure(); // even -> deinterleave; odd -> strided DMA
-  if ((lastStride & (lastStride - 1)) == 0)
-    return failure(); // power-of-two >= 4 -> strided DMA
-
-  // ---- Compute per-axis effective base offsets: mtpt.offsets[d] +
-  // (advance.offsets[d] if present)
-  ValueRange mtptOffsets = mtpt.getOffsets();
-  ValueRange advOffsets = advance ? advance.getOffsets() : ValueRange{};
-  if (static_cast<int64_t>(mtptOffsets.size()) != rank)
-    return failure();
-  if (advance && static_cast<int64_t>(advOffsets.size()) != rank)
-    return failure();
-
-  // ---- All checks passed: from here on IR mutation is committed. ----
-
-  // Unwrap any `tt.addptr` chain on the SCALAR base ptr (e.g. when the
-  // kernel writes `tl.make_block_ptr(s + bos*H + i_h, ...)`). If we left
-  // those scalar AddPtrs in place, the AddPtrConverter would lower each
-  // into a `memref.reinterpret_cast ... sizes: [1]` single-element view. By
-  // walking the scalar AddPtr chain here we (a) fold its scalar offsets into
-  // `scalarBaseAdj` and (b) recover the original underlying `!tt.ptr<T>` to
-  // use as our src.
-  Value src = mtpt.getBase();
-  Value scalarBaseAdj =
-      rewriter.create<arith::ConstantOp>(loc, rewriter.getI64IntegerAttr(0));
-  while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
-    // Only unwrap scalar AddPtr chains -- tensor-of-ptrs AddPtrs are not
-    // expected here (mtpt.getBase() is always a scalar ptr).
-    if (isa<RankedTensorType>(addptr.getPtr().getType()))
-      break;
-    Value off = addptr.getOffset();
-    Value offI64 = ensureI64Scalar(off, loc, rewriter);
-    if (!offI64)
-      return failure();
-    scalarBaseAdj = rewriter.create<arith::AddIOp>(loc, scalarBaseAdj, offI64);
-    src = addptr.getPtr();
-  }
-
-  // Build the scalar base offset:
-  //   scalarBaseAdj + sum_d (mtpt.offsets[d] + adv.offsets[d]) * strides[d].
-  // Boundary checks are expressed in logical make_tensor_ptr coordinates, so
-  // numels must use the unstrided per-axis offsets rather than this physical
-  // GM offset.
-  Value scalarBase = scalarBaseAdj;
-  SmallVector<Value> logicalOffsets;
-  SmallVector<Value> strideOperands;
-  logicalOffsets.reserve(rank);
-  strideOperands.reserve(rank);
-  for (int64_t d = 0; d < rank; ++d) {
-    Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
-    if (!baseOff)
-      return failure();
-    if (advance) {
-      Value advStep = ensureI64Scalar(advOffsets[d], loc, rewriter);
-      if (!advStep)
-        return failure();
-      baseOff = rewriter.create<arith::AddIOp>(loc, baseOff, advStep);
-    }
-    logicalOffsets.push_back(baseOff);
-    Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
-    if (!strI64)
-      return failure();
-    strideOperands.push_back(strI64);
-    Value prod = rewriter.create<arith::MulIOp>(loc, baseOff, strI64);
-    scalarBase = rewriter.create<arith::AddIOp>(loc, scalarBase, prod);
-  }
-
-  if (resultType.getRank() >= 1 && resultType.getRank() <= 3 &&
-      resultType.hasStaticShape()) {
-    FailureOr<SmallVector<Value>> numels = getBlockPtrStrideNumels(
-        op.getOperation(), op.getMask(), op.getBoundaryCheck(), mtpt,
-        resultType, logicalOffsets, rewriter);
-    if (succeeded(numels)) {
-      Value other = getStrideLoadOtherScalar(op, resultType, rewriter);
-      if (!other)
-        return failure();
-      Value strideLoadResult =
-          createStrideLoadOp(loc, resultType, src, scalarBase, other,
-                             strideOperands, *numels, rewriter);
-      if (!strideLoadResult)
-        return failure();
-
-      LLVM_DEBUG({
-        llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                     << (advance ? "+Advance" : "")
-                     << "]: tt.load -> ttasc.stride_load\n";
-        llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-        llvm::dbgs() << strideLoadResult.getDefiningOp() << "\n";
-        llvm::dbgs() << "----------------------------------------------\n";
-      });
-      rewriter.replaceOp(op, strideLoadResult);
-      return success();
-    }
-  }
-
-  if (rank <= 3)
-    return failure();
-
-  auto i64TensorTy = RankedTensorType::get(shape, i64Ty);
-  Value offsetTensor =
-      rewriter.create<triton::SplatOp>(loc, i64TensorTy, scalarBase);
-  for (int64_t d = 0; d < rank; ++d) {
-    auto axisTy = RankedTensorType::get({shape[d]}, rewriter.getI32Type());
-    Value arange = rewriter.create<triton::MakeRangeOp>(
-        loc, axisTy, /*start=*/0, /*end=*/static_cast<int32_t>(shape[d]));
-    Value arangeI64 = rewriter.create<arith::ExtSIOp>(
-        loc, RankedTensorType::get({shape[d]}, i64Ty), arange);
-    Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
-    Value strSplat = rewriter.create<triton::SplatOp>(
-        loc, RankedTensorType::get({shape[d]}, i64Ty), strI64);
-    Value stridedArange =
-        rewriter.create<arith::MulIOp>(loc, arangeI64, strSplat);
-    Value broadcasted = expandAndBroadcastForAxis(
-        stridedArange, static_cast<int>(d), shape, i64Ty, loc, rewriter);
-    offsetTensor =
-        rewriter.create<arith::AddIOp>(loc, offsetTensor, broadcasted);
-  }
-
-  // ---- boundary_check: build OOB mask + padding "other" ----
-  Value mask = op.getMask();
-  Value other = op.getOther();
-  auto boundaryCheck = op.getBoundaryCheck();
-  if (!boundaryCheck.empty()) {
-    // Effective offset per axis = mtpt.offsets[d] + (advance.offsets[d] if any)
-    SmallVector<Value> effOffsets;
-    for (int64_t d = 0; d < rank; ++d) {
-      Value off = mtptOffsets[d];
-      if (advance) {
-        off = rewriter.create<arith::AddIOp>(loc, off, advOffsets[d]);
-      }
-      effOffsets.push_back(off);
-    }
-    Value boundaryMask = buildBoundaryMask(loc, rewriter, shape, boundaryCheck,
-                                           effOffsets, mtpt.getShape());
-    mask = mask ? rewriter.create<arith::AndIOp>(loc, mask, boundaryMask)
-                      .getResult()
-                : boundaryMask;
-    if (!other) {
-      other = buildPaddingOther(loc, rewriter, resultType, op.getPadding());
-      if (!other) {
-        // PAD_NAN requested on non-float element type: bail to legacy
-        // path (which would also assert there).
-        return failure();
-      }
-    }
-  }
-
-  // ---- Emit tt.indirect_load ----
-  auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
-      loc, resultType, src, offsetTensor, mask, other,
-      ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
-  indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
-                        UnitAttr::get(rewriter.getContext()));
-
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                 << (advance ? "+Advance" : "")
-                 << (boundaryCheck.empty() ? "" : "+Boundary")
-                 << "]: tt.load -> tt.indirect_load\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectLoad << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
-  rewriter.replaceOp(op, indirectLoad.getResult());
-  return success();
-}
-
 // V2 (Store) helpers ----------------------------------------------------------
 
 // AddPtr path for tt.store. Mirrors tryRewriteAddPtrLoad but emits
@@ -1149,179 +776,6 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
   return success();
 }
 
-// Block-ptr path for tt.store. Mirrors tryRewriteBlockPtrLoad.
-static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
-                                             triton::MakeTensorPtrOp mtpt,
-                                             triton::AdvanceOp advance,
-                                             RankedTensorType valueType,
-                                             PatternRewriter &rewriter) {
-  auto loc = op.getLoc();
-  auto i64Ty = rewriter.getIntegerType(64);
-  ArrayRef<int64_t> shape = valueType.getShape();
-  int64_t rank = static_cast<int64_t>(shape.size());
-
-  auto order = mtpt.getOrder();
-  if (static_cast<int64_t>(order.size()) != rank)
-    return failure();
-  for (int64_t i = 0; i < rank; ++i) {
-    if (order[i] != rank - 1 - i)
-      return failure();
-  }
-
-  auto strides = mtpt.getStrides();
-  if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
-    return failure();
-  // Stride dispatch (mirrors tryRewriteBlockPtrLoad): dynamic strides stay on
-  // the structured SIMD path; only static non-power-of-two strides fall
-  // through to SIMT stride_store.
-  APInt lastStrideC;
-  if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
-    return failure();
-  int64_t lastStride = std::abs(lastStrideC.getSExtValue());
-  if (lastStride <= 1)
-    return failure();
-  if (lastStride == 2)
-    return failure(); // even -> deinterleave; odd -> strided DMA
-  if ((lastStride & (lastStride - 1)) == 0)
-    return failure(); // power-of-two >= 4 -> strided DMA
-
-  ValueRange mtptOffsets = mtpt.getOffsets();
-  ValueRange advOffsets = advance ? advance.getOffsets() : ValueRange{};
-  if (static_cast<int64_t>(mtptOffsets.size()) != rank)
-    return failure();
-  if (advance && static_cast<int64_t>(advOffsets.size()) != rank)
-    return failure();
-
-  // ---- All checks passed: from here on IR mutation is committed. ----
-
-  // Unwrap scalar AddPtr chain on the base (see comment in
-  // tryRewriteBlockPtrLoad for why this is required to avoid lowering to a
-  // size-1 reinterpret_cast view).
-  Value src = mtpt.getBase();
-  Value scalarBaseAdj =
-      rewriter.create<arith::ConstantOp>(loc, rewriter.getI64IntegerAttr(0));
-  while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
-    if (isa<RankedTensorType>(addptr.getPtr().getType()))
-      break;
-    Value off = addptr.getOffset();
-    Value offI64 = ensureI64Scalar(off, loc, rewriter);
-    if (!offI64)
-      return failure();
-    scalarBaseAdj = rewriter.create<arith::AddIOp>(loc, scalarBaseAdj, offI64);
-    src = addptr.getPtr();
-  }
-
-  Value scalarBase = scalarBaseAdj;
-  SmallVector<Value> logicalOffsets;
-  SmallVector<Value> strideOperands;
-  logicalOffsets.reserve(rank);
-  strideOperands.reserve(rank);
-  for (int64_t d = 0; d < rank; ++d) {
-    Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
-    if (!baseOff)
-      return failure();
-    if (advance) {
-      Value advStep = ensureI64Scalar(advOffsets[d], loc, rewriter);
-      if (!advStep)
-        return failure();
-      baseOff = rewriter.create<arith::AddIOp>(loc, baseOff, advStep);
-    }
-    logicalOffsets.push_back(baseOff);
-    Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
-    if (!strI64)
-      return failure();
-    strideOperands.push_back(strI64);
-    Value prod = rewriter.create<arith::MulIOp>(loc, baseOff, strI64);
-    scalarBase = rewriter.create<arith::AddIOp>(loc, scalarBase, prod);
-  }
-
-  auto boundaryCheck = op.getBoundaryCheck();
-  if (valueType.getRank() >= 1 && valueType.getRank() <= 3 &&
-      valueType.hasStaticShape()) {
-    FailureOr<SmallVector<Value>> numels =
-        getBlockPtrStrideNumels(op.getOperation(), op.getMask(), boundaryCheck,
-                                mtpt, valueType, logicalOffsets, rewriter);
-    if (succeeded(numels)) {
-      Operation *strideStore =
-          createStrideStoreOp(loc, valueType, src, op.getValue(), scalarBase,
-                              strideOperands, *numels, rewriter);
-      if (strideStore) {
-        LLVM_DEBUG({
-          llvm::dbgs() << "----------------------------------------------\n";
-          llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                       << (advance ? "+Advance" : "")
-                       << (boundaryCheck.empty() ? "" : "+Boundary")
-                       << "/Store]: tt.store -> ttasc.stride_store\n";
-          llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-          llvm::dbgs() << *strideStore << "\n";
-          llvm::dbgs() << "----------------------------------------------\n";
-        });
-        rewriter.eraseOp(op);
-        return success();
-      }
-    }
-  }
-
-  if (rank <= 3)
-    return failure();
-
-  auto i64TensorTy = RankedTensorType::get(shape, i64Ty);
-  Value offsetTensor =
-      rewriter.create<triton::SplatOp>(loc, i64TensorTy, scalarBase);
-  for (int64_t d = 0; d < rank; ++d) {
-    auto axisTy = RankedTensorType::get({shape[d]}, rewriter.getI32Type());
-    Value arange = rewriter.create<triton::MakeRangeOp>(
-        loc, axisTy, /*start=*/0, /*end=*/static_cast<int32_t>(shape[d]));
-    Value arangeI64 = rewriter.create<arith::ExtSIOp>(
-        loc, RankedTensorType::get({shape[d]}, i64Ty), arange);
-    Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
-    Value strSplat = rewriter.create<triton::SplatOp>(
-        loc, RankedTensorType::get({shape[d]}, i64Ty), strI64);
-    Value stridedArange =
-        rewriter.create<arith::MulIOp>(loc, arangeI64, strSplat);
-    Value broadcasted = expandAndBroadcastForAxis(
-        stridedArange, static_cast<int>(d), shape, i64Ty, loc, rewriter);
-    offsetTensor =
-        rewriter.create<arith::AddIOp>(loc, offsetTensor, broadcasted);
-  }
-
-  // ---- boundary_check: build OOB mask (store has no "other") ----
-  Value mask = op.getMask();
-  if (!boundaryCheck.empty()) {
-    SmallVector<Value> effOffsets;
-    for (int64_t d = 0; d < rank; ++d) {
-      Value off = mtptOffsets[d];
-      if (advance) {
-        off = rewriter.create<arith::AddIOp>(loc, off, advOffsets[d]);
-      }
-      effOffsets.push_back(off);
-    }
-    Value boundaryMask = buildBoundaryMask(loc, rewriter, shape, boundaryCheck,
-                                           effOffsets, mtpt.getShape());
-    mask = mask ? rewriter.create<arith::AndIOp>(loc, mask, boundaryMask)
-                      .getResult()
-                : boundaryMask;
-  }
-
-  auto indirectStore = rewriter.create<triton::ascend::IndirectStoreOp>(
-      loc, src, offsetTensor, op.getValue(), mask);
-  indirectStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
-                         UnitAttr::get(rewriter.getContext()));
-
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                 << (advance ? "+Advance" : "")
-                 << (boundaryCheck.empty() ? "" : "+Boundary")
-                 << "/Store]: tt.store -> tt.indirect_store\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectStore << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
-  rewriter.eraseOp(op);
-  return success();
-}
-
 } // namespace
 
 LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
@@ -1339,10 +793,9 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   if (op->hasAttr(mlir::ConverterUtils::discreteAttrName))
     return failure();
 
-  // ---- Common early checks (apply to both AddPtr and block-ptr paths) ----
-  // boundary_check is legal only on make_tensor_ptr loads; block-ptr handler
-  // builds an OOB mask + padding "other" for it. AddPtr loads should never
-  // have boundary_check (defensive bail kept in tryRewriteAddPtrLoad below).
+  // ---- Common early checks (AddPtr path only: upstream removed block
+  // pointers from the IR, so tt.make_tensor_ptr / tt.advance can no longer
+  // appear here) ----
   auto resultType = dyn_cast<RankedTensorType>(op.getResult().getType());
   if (!resultType)
     return failure();
@@ -1351,24 +804,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
 
   // ---- Dispatch on source op ----
   Value ptr = op.getPtr();
-  if (auto addPtrOp = ptr.getDefiningOp<triton::AddPtrOp>()) {
-    if (!op.getBoundaryCheck().empty())
-      return failure(); // defensive
+  if (auto addPtrOp = ptr.getDefiningOp<triton::AddPtrOp>())
     return tryRewriteAddPtrLoad(op, addPtrOp, resultType, rewriter);
-  }
-  if (auto mtptOp = ptr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    return tryRewriteBlockPtrLoad(op, mtptOp, /*advance=*/nullptr, resultType,
-                                  rewriter);
-  }
-  if (auto advOp = ptr.getDefiningOp<triton::AdvanceOp>()) {
-    // V1: one-level advance only. Nested advance / scf.for iter-arg block
-    // ptr falls through to the legacy strided memref.copy path.
-    if (auto baseMtpt =
-            advOp.getPtr().getDefiningOp<triton::MakeTensorPtrOp>()) {
-      return tryRewriteBlockPtrLoad(op, baseMtpt, advOp, resultType, rewriter);
-    }
-    return failure();
-  }
   return failure();
 }
 
@@ -1384,9 +821,8 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   if (op->hasAttr(mlir::ConverterUtils::discreteAttrName))
     return failure();
 
-  // boundary_check is legal only on make_tensor_ptr stores; block-ptr handler
-  // builds an OOB mask for it. AddPtr stores should never have boundary_check
-  // (defensive bail).
+  // boundary_check was legal only on make_tensor_ptr stores, which upstream
+  // removed from the IR; only the AddPtr path remains.
   auto valueType = dyn_cast<RankedTensorType>(op.getValue().getType());
   if (!valueType)
     return failure();
@@ -1394,22 +830,8 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     return failure();
 
   Value ptr = op.getPtr();
-  if (auto addPtrOp = ptr.getDefiningOp<triton::AddPtrOp>()) {
-    if (!op.getBoundaryCheck().empty())
-      return failure(); // defensive
+  if (auto addPtrOp = ptr.getDefiningOp<triton::AddPtrOp>())
     return tryRewriteAddPtrStore(op, addPtrOp, valueType, rewriter);
-  }
-  if (auto mtptOp = ptr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    return tryRewriteBlockPtrStore(op, mtptOp, /*advance=*/nullptr, valueType,
-                                   rewriter);
-  }
-  if (auto advOp = ptr.getDefiningOp<triton::AdvanceOp>()) {
-    if (auto baseMtpt =
-            advOp.getPtr().getDefiningOp<triton::MakeTensorPtrOp>()) {
-      return tryRewriteBlockPtrStore(op, baseMtpt, advOp, valueType, rewriter);
-    }
-    return failure();
-  }
   return failure();
 }
 

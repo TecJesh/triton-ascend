@@ -114,9 +114,6 @@ void AliasAnalysis::analyzePointerAliases(ControlFlowGraph &cfg) {
       if (auto addptrOp = dyn_cast<triton::AddPtrOp>(op)) {
         analyzeAddPtrOp(addptrOp);
         aliasOpsFound++;
-      } else if (auto makeTensorPtrOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
-        analyzeMakeTensorPtrOp(makeTensorPtrOp);
-        aliasOpsFound++;
       } else if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
         analyzeLoadOp(loadOp);
       } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
@@ -169,21 +166,6 @@ void AliasAnalysis::analyzeAddPtrOp(mlir::triton::AddPtrOp addptrOp) {
 
     LLVM_DEBUG(llvm::dbgs() << "  AddPtr: " << result << " -> " << basePtr
                             << " [" << tensor->getName() << "]\n");
-  }
-}
-
-void AliasAnalysis::analyzeMakeTensorPtrOp(mlir::triton::MakeTensorPtrOp op) {
-  // %tensor_ptr = tt.make_tensor_ptr %base, ...
-  Value basePtr = op.getBase();
-  Value result = op.getResult();
-
-  TensorObject *tensor = getTensorObject(basePtr);
-
-  if (tensor) {
-    addAlias(result, basePtr, tensor);
-
-    LLVM_DEBUG(llvm::dbgs() << "  MakeTensorPtr: " << result << " -> "
-                            << basePtr << " [" << tensor->getName() << "]\n");
   }
 }
 

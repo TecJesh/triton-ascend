@@ -135,6 +135,23 @@ BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
       rewriter.replaceOp(op, adaptor.getSrc());
       return success();
     }
+    if (srcPtrTy.getPointeeType() != dstPtrTy.getPointeeType()) {
+      // Width-changing pointer bitcast (e.g. byte buffer viewed as bf16):
+      // arith.bitcast is only valid for equal bitwidths. Rebuild the view
+      // from the raw address, mirroring the inttoptr handling in
+      // BlockDataParser::rewriteAddPtr.
+      auto addr = rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(
+          loc, adaptor.getSrc());
+      // hivm::PointerCastOp requires i64 addrs (Variadic<I64>); the raw
+      // address extracted above is an index. Cast it to i64, mirroring
+      // BlockDataParser::rewriteAddPtr.
+      Value addrI64 =
+          rewriter.create<arith::IndexCastOp>(loc, rewriter.getI64Type(), addr);
+      auto ptrCast = rewriter.create<hivm::PointerCastOp>(loc, resType,
+                                                          ValueRange{addrI64});
+      rewriter.replaceOp(op, ptrCast.getResult());
+      return success();
+    }
     result = rewriter.create<arith::BitcastOp>(loc, resType, adaptor.getSrc());
   } else {
     // handling normal case: bitcast between tensors/memrefs
@@ -160,28 +177,6 @@ LogicalResult
 YieldConverter::matchAndRewrite(scf::YieldOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
   rewriter.replaceOpWithNewOp<scf::YieldOp>(op, adaptor.getOperands());
-  return success();
-}
-
-LogicalResult
-AdvanceConverter::matchAndRewrite(triton::AdvanceOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter &rewriter) const {
-  llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteAdvanceOp(op, rewriter, known);
-  return success();
-}
-
-// ToDo:
-// 1. Refactor MakeTensorPtrConverter and AdvanceConverter with
-// memref::ReinterpretCastOp and memref::SubViewOp.
-// Use recast to describe full shape of tensor, and use subview to represent
-// current block tensor.
-LogicalResult MakeTensorPtrConverter::matchAndRewrite(
-    triton::MakeTensorPtrOp op, OpAdaptor adaptor,
-    ConversionPatternRewriter &rewriter) const {
-  llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteMakeTensorPtrOp(op, adaptor.getBase(), rewriter,
-                                          known);
   return success();
 }
 
@@ -391,8 +386,12 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   if (castBitwidth == 1)
     castBitwidth = 8;
   if (origBitwidth != castBitwidth) {
-    bitcastOp.emitError() << "Casting pointers with unmatched bitwidth!\n";
-    return failure();
+    // Width-changing pointer bitcasts (e.g. byte buffer views) are handled
+    // by BitcastConverter during the conversion phase. Do not emit an error
+    // here: failing the canonicalization would abort the whole pass.
+    return rewriter.notifyMatchFailure(
+        bitcastOp, "pointer bitcast with unmatched bitwidth is handled by "
+                   "the conversion phase");
   }
 
   Operation *beforeCastOp = castSrc.getDefiningOp();
@@ -525,195 +524,6 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     rewriter.replaceOp(op, extOp.getResult());
   }
 
-  return success();
-}
-
-void rewriteUserWithNewOrder(
-    mlir::OpOperand *use, PatternRewriter &rewriter,
-    llvm::SmallVector<int64_t, 8> &blkShapeI64, // 8: container size
-    mlir::Location &loc, llvm::ArrayRef<int32_t> &order, size_t &orderSize) {
-  Operation *user = use->getOwner();
-  rewriter.setInsertionPointAfter(user);
-  if (auto loadOp = dyn_cast<triton::LoadOp>(user)) {
-    auto loadResTy = loadOp.getResult().getType();
-    auto loadResShapedTy = cast<ShapedType>(loadResTy);
-    auto newLoadTy = loadResShapedTy.cloneWith(
-        blkShapeI64, loadResShapedTy.getElementType());
-    auto newLoadOp = rewriter.create<triton::LoadOp>(
-        loc, newLoadTy, loadOp->getOperands(), loadOp->getAttrs());
-    newLoadOp->setAttr(ConverterUtils::GeneratedByMakeTensorPtrTAG,
-                       UnitAttr::get(rewriter.getContext()));
-    rewriter.replaceOp(loadOp, newLoadOp);
-    // load contiguous data then permute. thus the permute order is as
-    // follows.
-    SmallVector<int32_t, 8> permuteOrder; // 8: container size
-    for (auto [i, v] : llvm::enumerate(order)) {
-      permuteOrder.push_back(orderSize - 1 - order[i]);
-    }
-    auto permuteOp = rewriter.create<triton::TransOp>(
-        loc, newLoadOp.getResult(),
-        DenseI32ArrayAttr::get(loadOp.getContext(), permuteOrder));
-    newLoadOp.getResult().replaceAllUsesExcept(permuteOp.getResult(),
-                                               permuteOp);
-  } else if (auto storeOp = dyn_cast<triton::StoreOp>(user)) {
-    // permute to contiguous then store. thus the permute order is as follows.
-    SmallVector<int32_t, 8> permuteOrder; // 8: container size
-    for (auto [i, v] : llvm::enumerate(order)) {
-      permuteOrder.push_back(order[orderSize - 1 - i]);
-    }
-    auto permuteOp = rewriter.create<triton::TransOp>(
-        loc, storeOp.getValue(),
-        DenseI32ArrayAttr::get(storeOp.getContext(), permuteOrder));
-    storeOp.getValue().replaceAllUsesExcept(permuteOp.getResult(), permuteOp);
-    auto newStoreOp = rewriter.create<triton::StoreOp>(
-        loc, storeOp.getPtr(), storeOp.getValue(), storeOp.getMask(),
-        storeOp.getBoundaryCheck(), storeOp.getCache(), storeOp.getEvict());
-    rewriter.replaceOp(storeOp, newStoreOp);
-  } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(user)) {
-    auto advanceResPtrTy =
-        cast<triton::PointerType>(advanceOp.getResult().getType());
-    auto advanceResShapedTy =
-        cast<ShapedType>(advanceResPtrTy.getPointeeType());
-    auto newAdvanceResShapedTy = advanceResShapedTy.cloneWith(
-        blkShapeI64, advanceResShapedTy.getElementType());
-    auto newAdvanceResPtrTy = triton::PointerType::get(
-        newAdvanceResShapedTy, advanceResPtrTy.getAddressSpace());
-    auto advanceOffsets = advanceOp.getOffsets();
-    llvm::SmallVector<Value, 8> newAdvanceOffsets; // 8: container size
-    for (int i = orderSize - 1; i >= 0; i--) {
-      newAdvanceOffsets.push_back(advanceOffsets[order[i]]);
-    }
-    SmallVector<OpOperand *> resUses;
-    for (auto &use : advanceOp->getUses())
-      resUses.push_back(&use);
-    auto newAdvanceOp = rewriter.create<triton::AdvanceOp>(
-        loc, newAdvanceResPtrTy, advanceOp.getPtr(), newAdvanceOffsets);
-    rewriter.replaceOp(advanceOp, newAdvanceOp);
-    for (auto resUse : resUses)
-      rewriteUserWithNewOrder(resUse, rewriter, blkShapeI64, loc, order,
-                              orderSize);
-  } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user)) {
-    auto initArg = use->get();
-    auto iterArg = loopOp.getTiedLoopRegionIterArg(use);
-    auto resultValue = loopOp.getTiedLoopResult(use);
-    iterArg.setType(initArg.getType());
-    resultValue.setType(initArg.getType());
-    for (auto &argUse : iterArg.getUses())
-      rewriteUserWithNewOrder(&argUse, rewriter, blkShapeI64, loc, order,
-                              orderSize);
-    for (auto &resUse : resultValue.getUses())
-      rewriteUserWithNewOrder(&resUse, rewriter, blkShapeI64, loc, order,
-                              orderSize);
-  } else if (isa<scf::YieldOp>(user)) {
-    return;
-  } else {
-    llvm_unreachable(
-        "[MakeTensorPtrCanonicalizer] tt.make_tensor_ptr's result is "
-        "not used by load/store/advance op");
-  }
-}
-
-void markLoadUsers(mlir::OpOperand *use, PatternRewriter &rewriter) {
-  Operation *user = use->getOwner();
-  if (auto loadOp = dyn_cast<triton::LoadOp>(user)) {
-    loadOp->setAttr(ConverterUtils::GeneratedByMakeTensorPtrTAG,
-                    UnitAttr::get(rewriter.getContext()));
-  } else if (auto storeOp = dyn_cast<triton::StoreOp>(user)) {
-    return;
-  } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(user)) {
-    SmallVector<OpOperand *> resUses;
-    for (auto &use : advanceOp->getUses())
-      resUses.push_back(&use);
-    for (auto resUse : resUses)
-      markLoadUsers(resUse, rewriter);
-  } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user)) {
-    auto initArg = use->get();
-    auto iterArg = loopOp.getTiedLoopRegionIterArg(use);
-    auto resultValue = loopOp.getTiedLoopResult(use);
-    iterArg.setType(initArg.getType());
-    resultValue.setType(initArg.getType());
-    for (auto &argUse : iterArg.getUses())
-      markLoadUsers(&argUse, rewriter);
-    for (auto &resUse : resultValue.getUses())
-      markLoadUsers(&resUse, rewriter);
-  } else if (isa<scf::YieldOp>(user)) {
-    return;
-  } else {
-    llvm_unreachable(
-        "[MakeTensorPtrCanonicalizer] tt.make_tensor_ptr's result is "
-        "not used by load/store/advance op");
-  }
-}
-
-LogicalResult
-MakeTensorPtrCanonicalizer::matchAndRewrite(triton::MakeTensorPtrOp op,
-                                            PatternRewriter &rewriter) const {
-  auto order = op.getOrder();
-  auto orderSize = order.size();
-  if (orderSize == 1) {
-    return rewriter.notifyMatchFailure(
-        op, "make_tensor_ptr's order has single value.");
-  }
-
-  bool isPermuted = false;
-  for (auto [first, second] : llvm::zip(order.slice(0, orderSize - 1),
-                                        order.slice(1, orderSize - 1))) {
-    if (first != second + 1) {
-      isPermuted = true;
-      break;
-    }
-  }
-
-  auto loc = op.getLoc();
-  auto base = op.getBase();
-  auto shape = op.getShape();
-  auto strides = op.getStrides();
-  auto offsets = op.getOffsets();
-  auto result = op.getResult();
-  SmallVector<OpOperand *> opUses;
-
-  for (auto &use : result.getUses())
-    opUses.push_back(&use);
-  for (auto use : opUses)
-    markLoadUsers(use, rewriter);
-
-  if (!isPermuted) {
-    return rewriter.notifyMatchFailure(
-        op, "make_tensor_ptr's order is contiguous.");
-  }
-
-  llvm::SmallVector<int32_t, 8> blkShapeI32;
-  llvm::SmallVector<int64_t, 8> blkShapeI64;
-  auto resPtrType = cast<triton::PointerType>(result.getType());
-  if (auto resShapedTy = dyn_cast<ShapedType>(resPtrType.getPointeeType())) {
-    auto resBlkShape = resShapedTy.getShape();
-    for (auto [i, v] : llvm::enumerate(resBlkShape)) {
-      auto reverseI = orderSize - 1 - i;
-      blkShapeI32.push_back(resBlkShape[order[reverseI]]);
-      blkShapeI64.push_back(resBlkShape[order[reverseI]]);
-    }
-  }
-
-  llvm::SmallVector<Value, 8> newShape;
-  llvm::SmallVector<Value, 8> newStrides;
-  llvm::SmallVector<Value, 8> newOffsets;
-  for (int i = orderSize - 1; i >= 0; i--) {
-    newShape.push_back(shape[order[i]]);
-    newStrides.push_back(strides[order[i]]);
-    newOffsets.push_back(offsets[order[i]]);
-  }
-
-  llvm::SmallVector<int, 8> contiguousOrder;
-  for (int i = orderSize - 1; i >= 0; i--)
-    contiguousOrder.push_back(i);
-
-  rewriter.setInsertionPoint(op);
-  auto newMakeTensorPtrOp = rewriter.create<triton::MakeTensorPtrOp>(
-      loc, base, ValueRange(newShape), ValueRange(newStrides),
-      ValueRange(newOffsets), blkShapeI32, contiguousOrder);
-  rewriter.replaceOp(op, newMakeTensorPtrOp);
-  for (auto use : opUses)
-    rewriteUserWithNewOrder(use, rewriter, blkShapeI64, loc, order, orderSize);
   return success();
 }
 
@@ -2069,82 +1879,6 @@ JoinConverter::matchAndRewrite(triton::JoinOp op, OpAdaptor adaptor,
   return success();
 }
 
-LogicalResult
-CatConverter::matchAndRewrite(triton::CatOp op, OpAdaptor adaptor,
-                              ConversionPatternRewriter &rewriter) const {
-  Value opa = op.getLhs();
-  Value opb = op.getRhs();
-  auto loc = op.getLoc();
-
-  auto resType = dyn_cast<RankedTensorType>(op.getResult().getType());
-  if (!resType || resType.getRank() != 1) {
-    return rewriter.notifyMatchFailure(op, "only support 1D cat");
-  }
-
-  auto inputTypeA = dyn_cast<RankedTensorType>(opa.getType());
-  auto inputTypeB = dyn_cast<RankedTensorType>(opb.getType());
-  if (!inputTypeA || !inputTypeB || inputTypeA.getRank() != 1 ||
-      inputTypeB.getRank() != 1) {
-    return rewriter.notifyMatchFailure(op, "inputs must be 1D tensors");
-  }
-
-  int64_t sizeA = inputTypeA.getShape()[0];
-  int64_t sizeB = inputTypeB.getShape()[0];
-
-  // Only handle the case where both inputs have size 1 (i.e., scalar-like)
-  if (sizeA == 1 && sizeB == 1) {
-    // Use scalar extract + insert
-    auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, resType.getShape(),
-                                                    resType.getElementType());
-
-    Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-    Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-
-    Value scalarA = rewriter.create<tensor::ExtractOp>(loc, opa, zero);
-    Value scalarB = rewriter.create<tensor::ExtractOp>(loc, opb, zero);
-
-    Value inserted0 =
-        rewriter.create<tensor::InsertOp>(loc, scalarA, emptyOp, zero);
-    Value inserted1 =
-        rewriter.create<tensor::InsertOp>(loc, scalarB, inserted0, one);
-
-    rewriter.replaceOp(op, inserted1);
-    return success();
-  }
-
-  // General case: use tensor.insert_slice
-  auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, resType.getShape(),
-                                                  resType.getElementType());
-
-  auto rank = resType.getRank();
-  SmallVector<OpFoldResult> offsets(rank, rewriter.getIndexAttr(0));
-  SmallVector<OpFoldResult> strides(rank, rewriter.getIndexAttr(1));
-
-  auto inputType = dyn_cast<RankedTensorType>(opa.getType());
-
-  SmallVector<OpFoldResult> sizes =
-      llvm::map_to_vector(inputType.getShape(), [&](int64_t t) {
-        return OpFoldResult(rewriter.getI64IntegerAttr(t));
-      });
-
-  auto insert0 = rewriter.create<tensor::InsertSliceOp>(
-      loc, opa, emptyOp, offsets, sizes, strides);
-
-  offsets[0] =
-      rewriter.getIndexAttr(inputType.getRank() ? inputType.getShape()[0] : 1);
-  auto insert1 = rewriter.create<tensor::InsertSliceOp>(
-      loc, opb, insert0, offsets, sizes, strides);
-
-  rewriter.replaceOp(op, insert1);
-  return success();
-}
-
-/// @brief Convert tt.gather to func.call. BiShengIR captures the func
-///        with assumed semantics.
-/// @param op The `triton::GatherOp` operation to be rewritten.
-/// @param adaptor An adaptor for the operation's operands.
-/// @param rewriter A pattern rewriter used to modify the IR.
-/// @return A `LogicalResult` indicating whether the rewrite was successful.
 LogicalResult
 GatherConverter::matchAndRewrite(triton::GatherOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {

@@ -219,13 +219,6 @@ public:
                   ConversionPatternRewriter &rewriter,
                   const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  template <typename T>
-  static std::enable_if_t<std::is_same_v<T, triton::MakeTensorPtrOp> ||
-                          std::is_same_v<T, triton::AdvanceOp>>
-  parseTensorPtr(T op, BlockData &data, const Location &loc,
-                 ConversionPatternRewriter &rewriter,
-                 const llvm::SmallDenseMap<Value, BlockData> &known);
-
   static void parseAddPtr(triton::AddPtrOp op, BlockData &data,
                           const Location &loc,
                           ConversionPatternRewriter &rewriter,
@@ -287,15 +280,6 @@ public:
                             triton::AddPtrOp::Adaptor &adaptor,
                             ConversionPatternRewriter &rewriter,
                             llvm::SmallDenseMap<Value, BlockData> &known);
-
-  static void
-  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value base,
-                         ConversionPatternRewriter &rewriter,
-                         llvm::SmallDenseMap<Value, BlockData> &known);
-
-  static void rewriteAdvanceOp(triton::AdvanceOp op,
-                               ConversionPatternRewriter &rewriter,
-                               llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor,

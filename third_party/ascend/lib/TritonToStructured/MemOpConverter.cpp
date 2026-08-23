@@ -49,6 +49,7 @@
 #include "triton/Dialect/Triton/IR/Types.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -78,6 +79,21 @@ using namespace TritonToStructured;
 
 namespace {
 
+// Upstream removed tt.cat and now lowers `tl.cat` to
+// tt.reshape(tt.trans(tt.join(lhs, rhs), {1, 0})). When the concatenated
+// operands are 1-D tensors of pointers, neither the Unstructure pass nor the
+// pointer analysis can express the joined pointer tensor, so split the chain
+// back into two loads/stores on the original halves (the same strategy that
+// was previously applied to tt.cat).
+struct CatPointerChain {
+  triton::JoinOp join;
+
+  // JoinOp's accessors are non-const (upstream removed the const qualifiers
+  // when CatOp was deleted), so these wrappers cannot be const either.
+  Value lhs() { return join.getLhs(); }
+  Value rhs() { return join.getRhs(); }
+};
+
 struct CatPointerShape {
   int64_t lhsSize;
   int64_t rhsSize;
@@ -90,25 +106,54 @@ struct SplitValues {
   Value rhs;
 };
 
-FailureOr<CatPointerShape> getCatPointerShape(triton::CatOp catOp) {
-  auto lhsType = dyn_cast<RankedTensorType>(catOp.getLhs().getType());
-  auto rhsType = dyn_cast<RankedTensorType>(catOp.getRhs().getType());
-  auto resultType = dyn_cast<RankedTensorType>(catOp.getType());
-  if (!lhsType || !rhsType || !resultType || lhsType.getRank() != 1 ||
-      rhsType.getRank() != 1 || resultType.getRank() != 1 ||
-      !lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
-      !resultType.hasStaticShape() ||
+FailureOr<CatPointerShape> getCatPointerShape(CatPointerChain chain) {
+  auto lhsType = dyn_cast<RankedTensorType>(chain.lhs().getType());
+  auto rhsType = dyn_cast<RankedTensorType>(chain.rhs().getType());
+  if (!lhsType || !rhsType || lhsType.getRank() != 1 ||
+      rhsType.getRank() != 1 || !lhsType.hasStaticShape() ||
+      !rhsType.hasStaticShape() ||
       !isa<triton::PointerType>(lhsType.getElementType()) ||
-      lhsType.getElementType() != rhsType.getElementType() ||
-      lhsType.getElementType() != resultType.getElementType()) {
+      lhsType.getElementType() != rhsType.getElementType()) {
     return failure();
   }
 
   CatPointerShape shape{lhsType.getDimSize(0), rhsType.getDimSize(0)};
-  if (shape.lhsSize != shape.rhsSize ||
-      resultType.getDimSize(0) != shape.totalSize())
+  if (shape.lhsSize != shape.rhsSize)
     return failure();
   return shape;
+}
+
+// Recognize the pointer form of `tl.cat`: a 1-D tensor of pointers built as
+// reshape(trans(join(lhs, rhs), {1, 0})) with static, identical half sizes.
+FailureOr<CatPointerChain> matchCatPointerChain(Value ptr) {
+  auto reshapeOp = ptr.getDefiningOp<triton::ReshapeOp>();
+  if (!reshapeOp)
+    return failure();
+  auto transOp = reshapeOp.getSrc().getDefiningOp<triton::TransOp>();
+  if (!transOp)
+    return failure();
+  auto joinOp = transOp.getSrc().getDefiningOp<triton::JoinOp>();
+  if (!joinOp)
+    return failure();
+
+  auto resultType = dyn_cast<RankedTensorType>(reshapeOp.getType());
+  auto transType = dyn_cast<RankedTensorType>(transOp.getType());
+  auto joinType = dyn_cast<RankedTensorType>(joinOp.getType());
+  if (!resultType || !transType || !joinType || resultType.getRank() != 1 ||
+      transType.getRank() != 2 || joinType.getRank() != 2 ||
+      !resultType.hasStaticShape()) {
+    return failure();
+  }
+
+  auto shape = getCatPointerShape(CatPointerChain{joinOp});
+  if (failed(shape) || resultType.getDimSize(0) != shape->totalSize())
+    return failure();
+
+  auto order = transOp.getOrder();
+  if (order.size() != 2 || order[0] != 1 || order[1] != 0)
+    return failure();
+
+  return CatPointerChain{joinOp};
 }
 
 bool isCatAlignedValue(Value value, int64_t totalSize) {
@@ -160,6 +205,24 @@ SplitValues splitCatAlignedValue(Value value, const CatPointerShape &shape,
   return {split.getOutLHS(), split.getOutRHS()};
 }
 
+void eraseCatPointerChain(CatPointerChain chain, PatternRewriter &rewriter) {
+  triton::JoinOp join = chain.join;
+  for (Operation *user :
+       llvm::make_early_inc_range(join.getResult().getUsers())) {
+    if (auto transOp = dyn_cast<triton::TransOp>(user)) {
+      for (Operation *transUser :
+           llvm::make_early_inc_range(transOp.getResult().getUsers())) {
+        if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(transUser))
+          rewriter.eraseOp(reshapeOp);
+      }
+      if (transOp.use_empty())
+        rewriter.eraseOp(transOp);
+    }
+  }
+  if (join.use_empty())
+    rewriter.eraseOp(join);
+}
+
 void copyMissingAttrs(Operation *source, Operation *target) {
   for (NamedAttribute attr : source->getAttrs()) {
     if (!target->hasAttr(attr.getName()))
@@ -167,9 +230,9 @@ void copyMissingAttrs(Operation *source, Operation *target) {
   }
 }
 
-LogicalResult rewriteCatPointerLoad(triton::LoadOp op, triton::CatOp catOp,
+LogicalResult rewriteCatPointerLoad(triton::LoadOp op, CatPointerChain chain,
                                     PatternRewriter &rewriter) {
-  FailureOr<CatPointerShape> shape = getCatPointerShape(catOp);
+  FailureOr<CatPointerShape> shape = getCatPointerShape(chain);
   if (failed(shape) || !isCatAlignedValue(op.getMask(), shape->totalSize()) ||
       !isCatAlignedValue(op.getOther(), shape->totalSize())) {
     return failure();
@@ -180,26 +243,33 @@ LogicalResult rewriteCatPointerLoad(triton::LoadOp op, triton::CatOp catOp,
   SplitValues others =
       splitCatAlignedValue(op.getOther(), *shape, loc, rewriter);
   auto lhsLoad = rewriter.create<triton::LoadOp>(
-      loc, catOp.getLhs(), masks.lhs, others.lhs, op.getBoundaryCheck(),
-      op.getPadding(), op.getCache(), op.getEvict(), op.getIsVolatile());
+      loc, chain.lhs(), masks.lhs, others.lhs, op.getCache(), op.getEvict(),
+      op.getIsVolatile());
   auto rhsLoad = rewriter.create<triton::LoadOp>(
-      loc, catOp.getRhs(), masks.rhs, others.rhs, op.getBoundaryCheck(),
-      op.getPadding(), op.getCache(), op.getEvict(), op.getIsVolatile());
+      loc, chain.rhs(), masks.rhs, others.rhs, op.getCache(), op.getEvict(),
+      op.getIsVolatile());
   copyMissingAttrs(op.getOperation(), lhsLoad.getOperation());
   copyMissingAttrs(op.getOperation(), rhsLoad.getOperation());
 
-  auto result = rewriter.create<triton::CatOp>(
-      loc, op.getType(), ValueRange{lhsLoad.getResult(), rhsLoad.getResult()});
-  copyMissingAttrs(catOp.getOperation(), result.getOperation());
-  rewriter.replaceOp(op, result.getResult());
-  if (catOp.getResult().use_empty())
-    rewriter.eraseOp(catOp);
+  // Recombine the halves into the original concatenated result type:
+  // join -> trans -> reshape (the inverse of the pointer chain).
+  auto elementType = cast<RankedTensorType>(lhsLoad.getType()).getElementType();
+  auto joinType = RankedTensorType::get({shape->lhsSize, 2}, elementType);
+  auto transType = RankedTensorType::get({2, shape->lhsSize}, elementType);
+  auto joinOp = rewriter.create<triton::JoinOp>(
+      loc, joinType, lhsLoad.getResult(), rhsLoad.getResult());
+  auto transOp = rewriter.create<triton::TransOp>(
+      loc, transType, joinOp.getResult(), SmallVector<int32_t>{1, 0});
+  auto resultOp = rewriter.create<triton::ReshapeOp>(loc, op.getType(),
+                                                     transOp.getResult());
+  rewriter.replaceOp(op, resultOp.getResult());
+  eraseCatPointerChain(chain, rewriter);
   return success();
 }
 
-LogicalResult rewriteCatPointerStore(triton::StoreOp op, triton::CatOp catOp,
+LogicalResult rewriteCatPointerStore(triton::StoreOp op, CatPointerChain chain,
                                      PatternRewriter &rewriter) {
-  FailureOr<CatPointerShape> shape = getCatPointerShape(catOp);
+  FailureOr<CatPointerShape> shape = getCatPointerShape(chain);
   if (failed(shape) || !isCatAlignedValue(op.getValue(), shape->totalSize()) ||
       !isCatAlignedValue(op.getMask(), shape->totalSize())) {
     return failure();
@@ -210,17 +280,14 @@ LogicalResult rewriteCatPointerStore(triton::StoreOp op, triton::CatOp catOp,
       splitCatAlignedValue(op.getValue(), *shape, loc, rewriter);
   SplitValues masks = splitCatAlignedValue(op.getMask(), *shape, loc, rewriter);
   auto lhsStore = rewriter.create<triton::StoreOp>(
-      loc, catOp.getLhs(), values.lhs, masks.lhs, op.getBoundaryCheck(),
-      op.getCache(), op.getEvict());
+      loc, chain.lhs(), values.lhs, masks.lhs, op.getCache(), op.getEvict());
   auto rhsStore = rewriter.create<triton::StoreOp>(
-      loc, catOp.getRhs(), values.rhs, masks.rhs, op.getBoundaryCheck(),
-      op.getCache(), op.getEvict());
+      loc, chain.rhs(), values.rhs, masks.rhs, op.getCache(), op.getEvict());
   copyMissingAttrs(op.getOperation(), lhsStore.getOperation());
   copyMissingAttrs(op.getOperation(), rhsStore.getOperation());
 
   rewriter.eraseOp(op);
-  if (catOp.getResult().use_empty())
-    rewriter.eraseOp(catOp);
+  eraseCatPointerChain(chain, rewriter);
   return success();
 }
 
@@ -287,9 +354,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   auto oldMask = op.getMask();
   auto oldOther = op.getOther();
 
-  if (auto catOp = oldPtr.getDefiningOp<triton::CatOp>()) {
-    if (succeeded(rewriteCatPointerLoad(op, catOp, rewriter)))
-      return success();
+  if (auto chain = matchCatPointerChain(oldPtr); succeeded(chain)) {
+    return rewriteCatPointerLoad(op, *chain, rewriter);
   }
 
   MemOpTransformer tf(MemOpTransformer::MemType::load, optimizeDynamicOffset);
@@ -344,9 +410,8 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   auto oldMask = op.getMask();
   auto oldValue = op.getValue();
 
-  if (auto catOp = oldPtr.getDefiningOp<triton::CatOp>()) {
-    if (succeeded(rewriteCatPointerStore(op, catOp, rewriter)))
-      return success();
+  if (auto chain = matchCatPointerChain(oldPtr); succeeded(chain)) {
+    return rewriteCatPointerStore(op, *chain, rewriter);
   }
 
   // AddPtrSplatConverter can preserve a non-singleton zero-stride dimension
@@ -397,8 +462,7 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
       tf.materializeImplicitPermute(reshapeResult, loc, rewriter);
 
   auto storeOp = rewriter.create<triton::StoreOp>(
-      loc, newPtr, permuteResult, newMask, op.getBoundaryCheck(), op.getCache(),
-      op.getEvict());
+      loc, newPtr, permuteResult, newMask, op.getCache(), op.getEvict());
 
   // insert sync_block_unlock
   if (oldMask && !newMask) {
@@ -513,8 +577,9 @@ Value MemOpTransformer::materializeImplicitSelect(Value srcTensor, Value mask,
   }
 
   if (currentType == MemType::store) {
-    auto loadOp = rewriter.create<triton::LoadOp>(loc, other, nullptr, nullptr,
-                                                  ArrayRef<int32_t>(), nullptr);
+    auto loadOp = rewriter.create<triton::LoadOp>(
+        loc, other, /*mask=*/nullptr, /*other=*/nullptr,
+        triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL, false);
     other = loadOp.getResult();
   }
 

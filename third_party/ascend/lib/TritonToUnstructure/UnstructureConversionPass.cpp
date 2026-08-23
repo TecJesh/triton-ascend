@@ -711,8 +711,7 @@ void UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
   Value other = op.getOther();
   Value loadedValue = rewriter.create<triton::LoadOp>(
       loc, extractedPtr, /*mask=*/nullptr, /*other=*/nullptr,
-      /*boundaryCheck=*/ArrayRef<int32_t>(),
-      /*PaddingOptionAttr=*/nullptr);
+      triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL, false);
   loadedValue = rewriter.create<triton::SplatOp>(loc, op.getResult().getType(),
                                                  loadedValue);
   if (mask)
@@ -873,16 +872,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       extractedShape.push_back(size);
     } else {
       scf::ForOp forOp;
-      if (auto mtptOp =
-              srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
-        auto tptShape = mtptOp.getShape()[i];
-        if (tptShape.getType() != rewriter.getIndexType()) {
-          tptShape = rewriter.create<arith::IndexCastOp>(
-              loc, rewriter.getIndexType(), tptShape);
-        }
-        sizeVal = rewriter.create<arith::MinSIOp>(loc, sizeVal, tptShape);
-      }
-
       Value loopLower = zeroIdx;
       Value loopUpper = sizeVal;
       if (mstate && i < mstate->dims.size() && i < mstate->offsets.size()) {
@@ -925,28 +914,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   Value extractedOffset;
   if (fullyUnstructured) {
-    if (auto mtptOp =
-            srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
-      auto I64Type = rewriter.getIntegerType(64);
-      srcPtr = mtptOp.getBase();
-      extractedOffset = rewriter.create<arith::ConstantIntOp>(loc, 0, 64);
-      for (auto [indVar, offset, stride] : llvm::zip_equal(
-               offsets, ptrOffsetInfo.getOffsets(), mtptOp.getStrides())) {
-        Value inductionVar = rewriter.create<arith::IndexCastOp>(
-            loc, I64Type, cast<Value>(indVar));
-        Value tptOffset = rewriter.create<arith::ExtSIOp>(loc, I64Type, offset);
-        Value tptStride = rewriter.create<arith::ExtSIOp>(loc, I64Type, stride);
-        tptOffset = rewriter.create<arith::MulIOp>(loc, tptStride, tptOffset);
-        tptStride =
-            rewriter.create<arith::MulIOp>(loc, tptStride, inductionVar);
-        extractedOffset =
-            rewriter.create<arith::AddIOp>(loc, extractedOffset, tptOffset);
-        extractedOffset =
-            rewriter.create<arith::AddIOp>(loc, extractedOffset, tptStride);
-      }
-    } else {
-      extractedOffset = createExtractOp(loc, ptrOffset, rewriter, offsets);
-    }
+    extractedOffset = createExtractOp(loc, ptrOffset, rewriter, offsets);
   } else {
     extractedOffset =
         createExtractOp(loc, ptrOffset, rewriter, offsets, sizes, strides);

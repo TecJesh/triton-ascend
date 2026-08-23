@@ -441,9 +441,9 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       Value other = ld.getOther()
                         ? liftOperand(ld.getOther(), localMap)
                         : makeZero(opLoc, liftTy(ld.getResult().getType()));
-      auto nu = rw.create<triton::LoadOp>(
-          opLoc, ptr, mask, other, ld.getBoundaryCheck(), ld.getPadding(),
-          ld.getCache(), ld.getEvict(), ld.getIsVolatile());
+      auto nu =
+          rw.create<triton::LoadOp>(opLoc, ptr, mask, other, ld.getCache(),
+                                    ld.getEvict(), ld.getIsVolatile());
       copyAttrs(ld, nu);
       (*localMap)[ld.getResult()] = nu.getResult();
       return true;
@@ -461,8 +461,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
         mask = mask ? rw.create<arith::AndIOp>(opLoc, mask, rowMaskForStore)
                     : rowMaskForStore;
       }
-      rw.create<triton::StoreOp>(opLoc, ptr, val, mask, st.getBoundaryCheck(),
-                                 st.getCache(), st.getEvict());
+      rw.create<triton::StoreOp>(opLoc, ptr, val, mask, st.getCache(),
+                                 st.getEvict());
       return true;
     }
 

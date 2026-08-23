@@ -271,7 +271,7 @@ bool areLoadsMaskable(ArrayRef<triton::LoadOp> loads, int64_t axis,
     // mask would suddenly make that operand observable.
     if (!load.getMask() && load.getOther())
       return false;
-    if (!load.getBoundaryCheck().empty() || load.getIsVolatile())
+    if (load.getIsVolatile())
       return false;
   }
   return true;

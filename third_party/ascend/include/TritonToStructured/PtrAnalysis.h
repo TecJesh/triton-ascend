@@ -99,9 +99,6 @@ struct PtrState {
                          OpBuilder &builder);
 
   triton::AddPtrOp createAddPtrOp(OpBuilder &builder, Location loc);
-
-  triton::MakeTensorPtrOp createMakeTensorPtrOp(OpBuilder &builder,
-                                                Location loc);
 };
 
 class PtrAnalysis {
@@ -172,14 +169,6 @@ public:
   // - The resulting state for ptr and offset wil be added
   LogicalResult visitOperandAddptr(triton::AddPtrOp addptrOp, PtrState &state,
                                    const Location loc, OpBuilder &builder);
-
-  // Operand is the result of tt.make_tensor_ptr.
-  // Expected result:
-  //  Parse source pointer and grab results
-  LogicalResult
-  visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTensorPtrOp,
-                            PtrState &state, const Location loc,
-                            OpBuilder &builder);
 
   // Parse the state of AddPtrOp, insert any instruction needed to
   // calculate strides and offsets, build PtrState for this operand, and record

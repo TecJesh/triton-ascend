@@ -56,6 +56,16 @@ namespace {
 // physical strides (for example N and 256 * N), masks, and scf loop-carried
 // pointers. Keeping it local also prevents a load/store layout extension from
 // changing StoreCoalescing admission semantics.
+// Upstream removed triton::isTensorPointerType together with block pointers
+// ("block pointer is python-only"): a scalar !tt.ptr whose pointee is a
+// tensor can no longer appear in the IR. Keep the predicate local so the
+// guards that used the removed helper stay valid.
+static bool isTensorPointerType(Type type) {
+  if (auto ptrType = dyn_cast<triton::PointerType>(type))
+    return isa<RankedTensorType>(ptrType.getPointeeType());
+  return false;
+}
+
 struct ScaleExpression {
   int64_t constantFactor = 1;
   SmallVector<Value, 4> symbols;
@@ -320,7 +330,7 @@ std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
   if (!pointerType || !pointerType.hasStaticShape() ||
       pointerType.getEncoding() || pointerType.getRank() < 2 ||
       !isa<triton::PointerType>(pointerType.getElementType()) ||
-      triton::isTensorPointerType(pointerType.getElementType()))
+      isTensorPointerType(pointerType.getElementType()))
     return std::nullopt;
 
   auto addPtr = pointer.getDefiningOp<triton::AddPtrOp>();
@@ -328,7 +338,7 @@ std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
     return std::nullopt;
   auto baseSplat = addPtr.getPtr().getDefiningOp<triton::SplatOp>();
   if (!baseSplat || !isa<triton::PointerType>(baseSplat.getSrc().getType()) ||
-      triton::isTensorPointerType(baseSplat.getSrc().getType()))
+      isTensorPointerType(baseSplat.getSrc().getType()))
     return std::nullopt;
 
   auto offsetType = dyn_cast<RankedTensorType>(addPtr.getOffset().getType());

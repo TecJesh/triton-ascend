@@ -77,6 +77,33 @@ using namespace triton;
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
 
+// MaskState::parse can create new ops that compute dynamic mask extents and
+// offsets. The dialect conversion driver may place ops created later in the
+// same pattern at earlier positions in the block, which makes the created
+// subview/slice reference a value before its definition (dominance
+// violation). Anchor the creations after the ops defining the dynamic mask
+// dims/offsets to keep the resulting block order valid.
+static void setInsertionPointAfterMaskOps(const MaskState &mstate,
+                                          Operation *op,
+                                          ConversionPatternRewriter &rewriter) {
+  Operation *anchor = op;
+  auto advanceAnchor = [&](const SmallVector<OpFoldResult> &ofrs) {
+    for (OpFoldResult ofr : ofrs) {
+      auto value = dyn_cast<Value>(ofr);
+      if (!value)
+        continue;
+      Operation *defOp = value.getDefiningOp();
+      if (defOp && defOp->getBlock() == anchor->getBlock() &&
+          anchor->isBeforeInBlock(defOp))
+        anchor = defOp;
+    }
+  };
+  advanceAnchor(mstate.dims);
+  advanceAnchor(mstate.offsets);
+  if (anchor != op)
+    rewriter.setInsertionPointAfter(anchor);
+}
+
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
@@ -504,76 +531,6 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
 
   auto tensorType = RankedTensorType::get(memRefShape, memRefElementType);
-  // boundary check
-  auto boundaryCheck = op.getBoundaryCheck();
-  if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
-    // handle the padding
-    auto padding = op.getPadding();
-    SmallVector<OpFoldResult> srcOffsets(boundarySizes.size(),
-                                         rewriter.getIndexAttr(0));
-    SmallVector<OpFoldResult> dstOffsets;
-    if (makeTensorPtrOp) {
-      auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(
-          loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
-        if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
-          dstOffsets.push_back(srcOffsets[idx]);
-          continue;
-        }
-        Value offset =
-            rewriter.createOrFold<arith::SubIOp>(loc, zeroVal, offVal);
-        Value size =
-            getValueOrCreateConstantIndexOp(rewriter, loc, boundarySizes[idx]);
-        offset = rewriter.createOrFold<arith::MaxSIOp>(loc, offset, zeroVal);
-        offset = rewriter.createOrFold<arith::IndexCastOp>(
-            loc, rewriter.getIndexType(), offset);
-        OpFoldResult ofr;
-        if (auto constOp = offset.getDefiningOp<arith::ConstantOp>()) {
-          ofr = constOp.getValue();
-        } else {
-          ofr = offset;
-        }
-        ofr = minOpFoldResult(ofr, size, loc, rewriter);
-        boundarySizes[idx] = subOpFoldResult(size, ofr, loc, rewriter);
-        dstOffsets.push_back(ofr);
-      }
-    } else {
-      dstOffsets = srcOffsets;
-    }
-    if (padding.has_value()) {
-      TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
-      // triton already ensure only NAN and ZERO are passed in
-      if (padding.value() == triton::PaddingOption::PAD_NAN) {
-        // FIXME: Why NaN requires elemTy to be non-int or non-index?
-        assert(!memRefElementType.isIntOrIndex());
-        auto apNaN = llvm::APFloat::getNaN(
-            cast<FloatAttr>(padAttr).getValue().getSemantics());
-        padAttr = rewriter.getFloatAttr(memRefElementType, apNaN);
-      }
-      auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
-
-      fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
-                                         rewriter);
-    }
-    auto srcSubView = mlir::ConverterUtils::makeSubViewOp(
-        ptr, srcOffsets, boundarySizes, loc, rewriter);
-    auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
-        allocOp, dstOffsets, boundarySizes, loc, rewriter);
-    auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubView, dstSubview);
-    propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
-                               rewriter);
-    if (mayImplicitTransposeWithLastAxis) {
-      auto markOp = rewriter.create<annotation::MarkOp>(loc, dstSubview);
-      markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
-                      UnitAttr::get(rewriter.getContext()));
-    }
-    return this->toTensorAndReplace(op, tensorType, allocOp,
-                                    mayImplicitTransposeWithLastAxis, loc,
-                                    rewriter);
-  }
 
   if (!mask) {
     assert(!other && "can not input 'other' when 'mask' is not set");
@@ -661,6 +618,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     return failure();
   } else {
     if (mstate.isMemrefSubviewValid(ptr, rewriter)) {
+      setInsertionPointAfterMaskOps(mstate, op, rewriter);
       memref::SubViewOp srcSubView = mstate.getSubview(ptr, loc, rewriter);
       memref::SubViewOp dstSubView = mstate.getSubview(allocOp, loc, rewriter);
       MemRefType dstSubViewType = mlir::cast<MemRefType>(dstSubView.getType());
@@ -1343,54 +1301,6 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
 
-  // 1. boundary size check
-  auto boundaryCheck = op.getBoundaryCheck();
-  if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
-    SmallVector<OpFoldResult> srcOffsets;
-    SmallVector<OpFoldResult> dstOffsets(boundarySizes.size(),
-                                         rewriter.getIndexAttr(0));
-    if (makeTensorPtrOp) {
-      auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(
-          loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
-        if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
-          srcOffsets.push_back(dstOffsets[idx]);
-          continue;
-        }
-        Value offset =
-            rewriter.createOrFold<arith::SubIOp>(loc, zeroVal, offVal);
-        Value size =
-            getValueOrCreateConstantIndexOp(rewriter, loc, boundarySizes[idx]);
-        offset = rewriter.createOrFold<arith::MaxSIOp>(loc, offset, zeroVal);
-        offset = rewriter.createOrFold<arith::IndexCastOp>(
-            loc, rewriter.getIndexType(), offset);
-        OpFoldResult ofr;
-        if (auto constOp = offset.getDefiningOp<arith::ConstantOp>()) {
-          ofr = constOp.getValue();
-        } else {
-          ofr = offset;
-        }
-        ofr = minOpFoldResult(ofr, size, loc, rewriter);
-        boundarySizes[idx] = subOpFoldResult(size, ofr, loc, rewriter);
-        srcOffsets.push_back(ofr);
-      }
-    } else {
-      srcOffsets = dstOffsets;
-    }
-    auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
-        val, srcOffsets, boundarySizes, loc, rewriter);
-    auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
-        ptr, dstOffsets, boundarySizes, loc, rewriter);
-    auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
-        loc, srcSlice, dstSubview);
-    storeOp.setWritable(true);
-    rewriter.eraseOp(op);
-    return success();
-  }
-
   // 2. Simple load with no mask
   if (!mask) {
     auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
@@ -1410,6 +1320,7 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
     return failure();
   }
   LLVM_DEBUG({ llvm::dbgs() << *getModuleOpFromOperation(op) << "\n"; });
+  setInsertionPointAfterMaskOps(mstate, op, rewriter);
   auto srcSlice = mstate.getExtractSlice(val, loc, rewriter);
   auto dstSubview = mstate.getSubview(ptr, loc, rewriter);
   auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(

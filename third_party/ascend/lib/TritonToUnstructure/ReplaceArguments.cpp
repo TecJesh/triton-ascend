@@ -94,21 +94,10 @@ void replaceArgs(ValueRange args, RewriterBase &rewriter,
                          ->getResult(0);
       parse(arg, arg.getLoc(), rewriter, offsetMap);
       rewriter.replaceAllUsesWith(arg, tempVar);
-      if (auto tensorType =
-              dyn_cast<RankedTensorType>(ptrType.getPointeeType())) {
-        auto srcOp =
-            offsetMap.at(arg).getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-        arg.setType(rewriter.getIntegerType(32));
-        SmallVector<Value> newOffsets;
-        for (auto offset : offsetMap.at(arg).getOffsets()) {
-          newOffsets.push_back(*it);
-          ++it;
-        }
-        --it;
-        rewriter.replaceOpWithNewOp<triton::MakeTensorPtrOp>(
-            tempVar.getDefiningOp(), tempVar.getType(), srcOp.getBase(),
-            srcOp.getShape(), srcOp.getStrides(), newOffsets, srcOp.getOrder());
-      } else {
+      // Block pointers (ptr whose pointee is a tensor) no longer exist in
+      // the IR since upstream made them python-only; only the scalar pointer
+      // case remains.
+      {
         auto src = offsetMap.at(arg).getPtr();
         arg.setType(rewriter.getIntegerType(64));
         rewriter.replaceOpWithNewOp<triton::AddPtrOp>(

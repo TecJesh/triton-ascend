@@ -46,6 +46,7 @@
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
@@ -493,6 +494,13 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
   IRMapping map;
   funcBody.cloneInto(&funcFuncBody, map);
 
+  // Cloning drops the op properties: any gpu.barrier whose `scope` property
+  // was cleared by the TritonToLLVM pass gets re-defaulted to `workgroup`
+  // here. The AscendNPU-IR fork's gpu dialect predates the `barrier_scope`
+  // attribute and cannot parse the printed IR, so clear the property again.
+  funcFuncBody.walk(
+      [](mlir::gpu::BarrierOp barrier) { barrier.setScopeAttr(nullptr); });
+
   if (!funcFuncBody.hasOneBlock()) {
     if (failed(convertMultipleBlockControlFlow(funcFunc, builder))) {
       llvm_unreachable("Encounter unsupported control flow");
@@ -703,12 +711,9 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::TritonMulhiuiConverter>(patterns.getContext());
   patterns.add<TTOpConverters::TritonPreciseSqrtConverter>(
       patterns.getContext());
-  patterns.add<TTOpConverters::MakeTensorPtrConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::AdvanceConverter>(patterns.getContext());
   patterns.add<TTOpConverters::TransposeConverter>(patterns.getContext());
   patterns.add<TTOpConverters::SplitConverter>(patterns.getContext());
   patterns.add<TTOpConverters::JoinConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::CatConverter>(patterns.getContext());
   patterns.add<TTOpConverters::BitcastConverter>(patterns.getContext());
   patterns.add<TTOpConverters::LoopConverter<scf::ForOp>>(
       patterns.getContext());
@@ -1253,11 +1258,38 @@ void TritonToLinalgPass::runOnOperation() {
         }
       }
 
-      rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
-          reinterpretCastOp, newResultType, newCastOp, ValueRange({}),
-          reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
-          SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
-          reinterpretCastOp.getStaticStrides());
+      auto newReinterpretCastOp =
+          rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
+              reinterpretCastOp, newResultType, newCastOp, ValueRange({}),
+              reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
+              SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
+              reinterpretCastOp.getStaticStrides());
+
+      // The static offset was folded into the pointer value above, so the
+      // reinterpret_cast result layout no longer carries it. Subviews created
+      // earlier still declare result types derived from the old offset; rewire
+      // them to types computed from the new (offset-free) source type,
+      // otherwise the verifier rejects the stale `offset:` in their layouts.
+      for (Operation *user :
+           llvm::make_early_inc_range(newReinterpretCastOp->getUsers())) {
+        auto subviewOp = dyn_cast<memref::SubViewOp>(user);
+        if (!subviewOp)
+          continue;
+        auto newSubviewType = memref::SubViewOp::inferResultType(
+            newResultType, subviewOp.getMixedOffsets(),
+            subviewOp.getMixedSizes(), subviewOp.getMixedStrides());
+        // Build the replacement where the old subview sits: the subview's
+        // dynamic size/offset operands (mask extents) are defined right
+        // before it, so creating it at the insertion point anchored at the
+        // reinterpret_cast (above) would place it before those definitions
+        // and trigger a dominance violation.
+        rewriter.setInsertionPoint(subviewOp);
+        auto newSubview = rewriter.create<memref::SubViewOp>(
+            subviewOp.getLoc(), cast<MemRefType>(newSubviewType),
+            subviewOp.getSource(), subviewOp.getMixedOffsets(),
+            subviewOp.getMixedSizes(), subviewOp.getMixedStrides());
+        rewriter.replaceOp(subviewOp, newSubview.getResult());
+      }
     }
     rewriter.eraseOp(op);
   }

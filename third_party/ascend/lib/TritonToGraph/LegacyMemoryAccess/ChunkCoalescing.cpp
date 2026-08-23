@@ -377,12 +377,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
       if (condTensor != valTensor)
         return;
     }
-    if (auto ld = dyn_cast<triton::LoadOp>(op))
-      if (!ld.getBoundaryCheck().empty())
-        return;
-    if (auto st = dyn_cast<triton::StoreOp>(op))
-      if (!st.getBoundaryCheck().empty())
-        return;
   }
 
   auto liftTy = [&](Type t) -> RankedTensorType {
@@ -434,9 +428,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
   auto liftOpdOrNull = [&](Value v) -> Value {
     return v ? liftOpd(v) : Value();
-  };
-  auto bumpBoundary = [&](ArrayRef<int32_t> bc) {
-    return llvm::map_to_vector(bc, [](int32_t i) { return i + 1; });
   };
   auto copyAttrs = [&](Operation *from, Operation *to) {
     for (NamedAttribute a : from->getAttrs())
@@ -504,10 +495,9 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
       bool dropMask = ld.getMask() == seedMask;
       Value m = dropMask ? Value() : liftOpdOrNull(ld.getMask());
       Value o = dropMask ? Value() : liftOpdOrNull(ld.getOther());
-      auto bc = bumpBoundary(ld.getBoundaryCheck());
-      auto nu = rw.create<triton::LoadOp>(loc, liftOpd(ld.getPtr()), m, o, bc,
-                                          ld.getPadding(), ld.getCache(),
-                                          ld.getEvict(), ld.getIsVolatile());
+      auto nu = rw.create<triton::LoadOp>(loc, liftOpd(ld.getPtr()), m, o,
+                                          ld.getCache(), ld.getEvict(),
+                                          ld.getIsVolatile());
       copyAttrs(ld, nu);
       vmap[ld.getResult()] = nu.getResult();
       continue;
@@ -515,9 +505,8 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
     if (auto st = dyn_cast<triton::StoreOp>(op)) {
       bool dropMask = st.getMask() == seedMask;
       Value m = dropMask ? Value() : liftOpdOrNull(st.getMask());
-      auto bc = bumpBoundary(st.getBoundaryCheck());
       rw.create<triton::StoreOp>(loc, liftOpd(st.getPtr()),
-                                 liftOpd(st.getValue()), m, bc, st.getCache(),
+                                 liftOpd(st.getValue()), m, st.getCache(),
                                  st.getEvict());
       continue;
     }

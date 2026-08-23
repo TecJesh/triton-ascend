@@ -221,14 +221,6 @@ void parseSIToFP(arith::SIToFPOp op, const Location &loc,
 //                          RewriterBase &rewriter,
 //                          llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
 
-void parseMakeTensorPtr(triton::MakeTensorPtrOp op, const Location &loc,
-                        RewriterBase &rewriter,
-                        llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
-
-void parseAdvance(triton::AdvanceOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
-
 void parseReduce(triton::ReduceOp op, const Location &loc,
                  RewriterBase &rewriter,
                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);

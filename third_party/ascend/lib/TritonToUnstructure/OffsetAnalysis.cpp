@@ -400,14 +400,10 @@ void parseTritonOp(Operation *tritonOp, const Location &loc,
   //                dyn_cast<triton::MakeTensorDescOp>(tritonOp)) {
   //   parseMakeTensorDesc(makeTensorDescOp, loc, rewriter, offsetMap);
   // }
-  else if (auto makeTensorPtrOp = dyn_cast<triton::MakeTensorPtrOp>(tritonOp)) {
-    parseMakeTensorPtr(makeTensorPtrOp, loc, rewriter, offsetMap);
-  } else if (auto reduceOp = dyn_cast<triton::ReduceOp>(tritonOp)) {
+  else if (auto reduceOp = dyn_cast<triton::ReduceOp>(tritonOp)) {
     parseReduce(reduceOp, loc, rewriter, offsetMap);
   } else if (auto reduceReturnOp = dyn_cast<triton::ReduceReturnOp>(tritonOp)) {
     parseReduceReturn(reduceReturnOp, loc, rewriter, offsetMap);
-  } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(tritonOp)) {
-    parseAdvance(advanceOp, loc, rewriter, offsetMap);
   } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(tritonOp)) {
     parseIntToPtr(intToPtrOp, loc, rewriter, offsetMap);
   }
@@ -876,44 +872,6 @@ void parseSIToFP(arith::SIToFPOp op, const Location &loc,
 //     return;
 //   offsetMap[dst].setStructured(dstType.getRank());
 // }
-
-void parseMakeTensorPtr(triton::MakeTensorPtrOp op, const Location &loc,
-                        RewriterBase &rewriter,
-                        llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Set MakeTensorPtr offset map
-  auto dst = op.getResult();
-  offsetMap[dst] = PtrOffsetInfo(dst);
-  auto dstType = dyn_cast<ShapedType>(
-      cast<triton::PointerType>(dst.getType()).getPointeeType());
-  if (!dstType)
-    return;
-  offsetMap[dst].setStructured(dstType.getRank());
-  offsetMap[dst].setOffsets(op.getOffsets());
-}
-
-void parseAdvance(triton::AdvanceOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Set Advance offset map
-  auto ptr = op.getPtr();
-  parse(ptr, op.getLoc(), rewriter, offsetMap);
-  auto dst = op.getResult();
-  auto ptrOffsetInfo = offsetMap.at(ptr);
-  offsetMap[dst] = ptrOffsetInfo;
-  auto dstType = dyn_cast<ShapedType>(
-      cast<triton::PointerType>(dst.getType()).getPointeeType());
-  if (!dstType)
-    return;
-  offsetMap[dst].setStructured(dstType.getRank());
-  auto &offsets = offsetMap[dst].getOffsetsRef();
-
-  RewriterBase::InsertionGuard guard(rewriter);
-  rewriter.setInsertionPoint(op);
-  for (auto [curOffset, opOffset] : llvm::zip(offsets, op.getOffsets())) {
-    curOffset =
-        rewriter.create<arith::AddIOp>(op.getLoc(), curOffset, opOffset);
-  }
-}
 
 void parseReduce(triton::ReduceOp op, const Location &loc,
                  RewriterBase &rewriter,

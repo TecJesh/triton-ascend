@@ -42,6 +42,16 @@ namespace LoadStoreConverter {
 using namespace mlir;
 using namespace triton;
 
+// Upstream removed triton::isTensorPointerType together with block pointers
+// ("block pointer is python-only"): a scalar !tt.ptr whose pointee is a
+// tensor can no longer appear in the IR. Keep the predicate local so the
+// templates below that used the removed helper stay valid.
+static bool isTensorPointerType(Type type) {
+  if (auto ptrType = dyn_cast<triton::PointerType>(type))
+    return isa<RankedTensorType>(ptrType.getPointeeType());
+  return false;
+}
+
 class AddPtrConverter : public OpConversionPattern<triton::AddPtrOp> {
 public:
   using OpConversionPattern<triton::AddPtrOp>::OpConversionPattern;
