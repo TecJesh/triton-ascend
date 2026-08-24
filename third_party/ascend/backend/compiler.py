@@ -183,7 +183,6 @@ def make_ttir(mod, metadata, opt):
             rule_mask=opt.graph_optimize_rule_mask,
             max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
             ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
-            emit_remarks=opt.graph_optimize_emit_remarks,
             force_simt_only=opt.force_simt_only,
         )
     pm.run(mod, 'make_ttir')
@@ -659,7 +658,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += ["--enable-sanitizer=true"]
         if not _is_debug_line_info_disabled():
             _compile_option_list += ["--enable-debug-info=true"]
-
+        if _enable_msdebug():
+            _compile_option_list += ["--enable-debug-variables=true"]
         if _enable_print_ub_bits():
             _compile_option_list += ["--enable-print-memory-allocated-size"]
 
@@ -917,7 +917,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--enable-memory-display=true"]
 
         if _enable_msdebug():
-            _compile_option_list += ["--enable-ms-debug=true"]
+            _compile_option_list += ["--enable-debug-variables=true"]
 
         enable_hivm_auto_cv_balance = metadata["enable_hivm_auto_cv_balance"]
         if enable_hivm_auto_cv_balance is not None:
@@ -1097,7 +1097,6 @@ class NPUOptions:
     graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64
     graph_optimize_ub_capacity_bytes: Optional[int] = None
-    graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0

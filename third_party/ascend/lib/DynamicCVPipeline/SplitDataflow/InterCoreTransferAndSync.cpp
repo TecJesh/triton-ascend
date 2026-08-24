@@ -696,7 +696,7 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       srcValue,                  // src
       cubeAllocOp->getResult(0), // dst
       mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, "CUBE", transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
                       builder);
@@ -825,7 +825,8 @@ bool InterCoreTransferAndSyncPass::isStoreDirectlyInUserChain(
       }
 
       // Check if user is in skip range
-      if (CVPipeline::isViewLike(user)) {
+      if (CVPipeline::isViewLike(user) || CVPipeline::isZeroAdd(user) ||
+          user->hasAttr(CVPipeline::kForMayNotExec)) {
         // Continue traversing through skip ops
         for (Value result : user->getResults()) {
           if (!visited.count(result)) {
