@@ -39,6 +39,9 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as extension
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 DEVICE = "npu"
 
 

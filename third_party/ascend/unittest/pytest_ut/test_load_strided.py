@@ -300,6 +300,7 @@ def _ref_block_ptr_strided(src_cpu_flat: torch.Tensor, block_m: int, block_n: in
     ("float32", 4, 8, 8, 1),
     ("float16", 8, 16, 16, 1),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_block_ptr_strided(dtype, block_m, block_n, stride_m, stride_n):
     max_offset = (block_m - 1) * stride_m + (block_n - 1) * stride_n + 1
     src = test_common.generate_tensor((max_offset, ), dtype).npu()
@@ -470,6 +471,7 @@ def _ref_block_ptr_scatter(src_cpu: torch.Tensor, block_m: int, block_n: int, st
     ("float32", 4, 8, 8, 1),
     ("float16", 8, 16, 16, 1),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_block_ptr_strided_scatter(dtype, block_m, block_n, stride_m, stride_n):
     src = test_common.generate_tensor((block_m, block_n), dtype).npu()
     out_numel = (block_m - 1) * stride_m + (block_n - 1) * stride_n + 1
@@ -567,6 +569,7 @@ def _ref_boundary_load(src_cpu_flat, parent_m, parent_n, stride_m, stride_n, blo
     # OOB only on last axis: block fully fits axis 0
     pytest.param("float32", 8, 3, 12, 4, 8, 8, False, marks=a3_known_boundary_load_issue),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_block_ptr_boundary_load(dtype, parent_m, parent_n, stride_m, stride_n, block_m, block_n, pad_nan):
     # in buffer covers all valid (i, j) where i < parent_m, j < parent_n.
     in_numel = (parent_m - 1) * stride_m + (parent_n - 1) * stride_n + 1
@@ -674,6 +677,7 @@ def kernel_chunk_local_cumsum(
     ("float32", 2, 512, 4, 64),
     ("float16", 4, 1024, 8, 128),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_chunk_local_cumsum_scalar_base(dtype, B, T, H, chunk_size):
     """Verify scalar-AddPtr-base make_block_ptr path produces correct results."""
     torch_dtype = eval("torch." + dtype)
@@ -706,6 +710,7 @@ def test_chunk_local_cumsum_scalar_base(dtype, B, T, H, chunk_size):
     ("float32", 7, 5, 15, 3, 8, 8),
     ("float16", 5, 5, 20, 4, 8, 8),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_block_ptr_boundary_store(dtype, parent_m, parent_n, stride_m, stride_n, block_m, block_n):
     src = test_common.generate_tensor((block_m, block_n), dtype).npu()
     out_numel = (parent_m - 1) * stride_m + (parent_n - 1) * stride_n + 1

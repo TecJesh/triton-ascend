@@ -112,6 +112,7 @@ def ref_reverse(value: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
 @pytest.mark.parametrize("bs,max_seq_len,dim,BLOCK_SIZE", [
     (2, 32, 16, 8),
 ])
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_reverse_sequence_kernel(bs, max_seq_len, dim, BLOCK_SIZE):
     device = "npu"
     value = torch.randn(bs, max_seq_len, dim, device=device, dtype=torch.float32)

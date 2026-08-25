@@ -3,6 +3,10 @@ import torch_npu
 import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 
 
 @triton.jit

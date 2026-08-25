@@ -60,7 +60,7 @@ def _paged_scale_load(
     physical_block = tl.load(block_tables_ptr + logical_block, mask=mask, other=0)
     kv_base = (physical_block * stride_kvblk + intra_block_pos * stride_kvpos)
     scale_addr = kv_base + DIM * stride_kvbyte
-    scale_ptr = (kv_ptr + scale_addr).to(tl.pointer_type(tl.uint32, 1), bitcast=True)
+    scale_ptr = (kv_ptr + scale_addr).to(tl.pointer_type(tl.uint32), bitcast=True)
     scale_u32 = tl.load(scale_ptr, mask=mask, other=0)
     tl.store(out_ptr + positions, scale_u32.to(tl.int32), mask=mask)
 
