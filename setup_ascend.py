@@ -152,6 +152,8 @@ def _get_npuir_patch_files():
         "bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt",
         "bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp",
         "bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp",
+        "bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp",
+        "bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp",
     ]
 
 
