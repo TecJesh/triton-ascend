@@ -44,8 +44,9 @@ section#triton-ascend h1 {
 
 /* The triton.language overview page keeps a visible toctree so its
    per-category pages nest in the sidebar. Hide the article's rendering
-   of that toctree; the sidebar nav is built from the doctree and is
-   unaffected. */
-div[role="main"] .toctree-wrapper.sidebar-groups-only {
+   of that toctree. The toctree-wrapper class only appears on toctrees
+   rendered by the directive in the article body; the theme's sidebar
+   nav is built separately from the doctree and is unaffected. */
+.toctree-wrapper.sidebar-groups-only {
     display: none;
 }
