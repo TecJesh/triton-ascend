@@ -54,6 +54,8 @@ Triton Ascend
    triton <python-api/triton>
    triton.language <python-api/triton.language>
    triton.testing <python-api/triton.testing>
+   triton.language 算子文档 <triton_api/index>
+   算子责任人清单 <triton_api/op_owner_list>
 
 .. Temporarily disabled -- restore into the toctree above when needed:
    triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
