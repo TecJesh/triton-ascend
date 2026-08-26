@@ -41,3 +41,11 @@ div.dtype-support-table table.docutils td:not(:first-child) {
 section#triton-ascend h1 {
     text-align: center;
 }
+
+/* The triton.language overview page keeps a visible toctree so its
+   per-category pages nest in the sidebar. Hide the article's rendering
+   of that toctree; the sidebar nav is built from the doctree and is
+   unaffected. */
+div[role="main"] .toctree-wrapper.sidebar-groups-only {
+    display: none;
+}
