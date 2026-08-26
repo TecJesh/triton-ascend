@@ -54,8 +54,8 @@ Triton Ascend
    triton <triton_api/triton/index>
    triton.language <triton_api/index>
    triton.testing <python-api/triton.testing>
+   triton.language 算子文档 <triton_api/index>
    算子责任人清单 <triton_api/op_owner_list>
-   libdevice开发者手册 <libdevice/libdevice_developer_guide>
 
 .. .. toctree::
 ..    :maxdepth: 1
