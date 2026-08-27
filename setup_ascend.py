@@ -142,19 +142,15 @@ def _get_triton_ascend_patch_file():
 
 
 def _get_npuir_patch_files():
-    return [
-        "CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td",
-        "bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td",
-        "bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt",
-        "bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td",
-        "bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt",
-        "bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp",
-        "bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp",
-        "bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp",
-        "bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp",
-    ]
+    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    files = []
+    with open(os.path.join(_THIS_DIR, patch_path), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("diff --git a/"):
+                target = line.split(" b/", 1)[-1].rstrip("\n")
+                if target != "/dev/null":
+                    files.append(target)
+    return files
 
 
 def _apply_npuir_patch():
