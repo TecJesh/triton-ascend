@@ -2485,7 +2485,7 @@ static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
   } else {
     auto srcBufferTy = MemRefType::get(t.getShape(), elemTy);
     Value srcBuffer =
-        rewriter.create<bufferization::ToBufferOp>(loc, srcBufferTy, v);
+        rewriter.create<bufferization::ToMemrefOp>(loc, srcBufferTy, v);
     rewriter.create<memref::CopyOp>(loc, srcBuffer, subview);
   }
 
