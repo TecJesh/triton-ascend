@@ -75,6 +75,7 @@ shapes = [
 
 @pytest.mark.parametrize('dtype, sigtype', [
     (torch.float32, 'float32'),
+    (torch.float16, 'float16')
 ])
 @pytest.mark.parametrize('N, NUMEL', shapes)
 def test_elementwsie_common(dtype, sigtype, N, NUMEL):
