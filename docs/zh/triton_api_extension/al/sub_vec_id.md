@@ -10,11 +10,11 @@ sub_vec_id编程接口返回N个Vector核的sub id，允许算子开发者根据
 
 <table>
   <tr>
-    <td>Python<br>def sub_vec_id() -&gt; i16</td>
+    <td>Python<br>def sub_vec_id() -&gt; tl.tensor</td>
   </tr>
 </table>
 
-- 返回值：返回范围为 [0, N) 的 Sub Vector ID，算子开发者可根据该ID决定N个并行Vector核中每个核处理的数据分片
+- 返回值：返回元素类型为 `tl.int64` 的标量 `tl.tensor`，取值范围为 [0, N)。算子开发者可根据该 ID 决定 N 个并行 Vector 核中每个核处理的数据分片
 
 - 入参：无
 
