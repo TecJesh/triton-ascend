@@ -31,6 +31,20 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
 
+# Upstream Triton removed the root-level find_package(pybind11) when
+# migrating to nanobind. Ascend targets still need both binding
+# frameworks: LibEntry keeps pybind11, while the TritonAscend plugin
+# (triton_ascend.cc / ascend_ir.cc) now uses nanobind to match upstream's
+# nanobind-based init_triton_<backend>(nanobind::module_ &) mechanism.
+# Resolve pybind11 here so the whole ascend subtree gets its include
+# directory.
+if(TRITON_BUILD_PYTHON_MODULE)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+  endif()
+  include_directories(${pybind11_INCLUDE_DIR})
+endif()
+
 add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
@@ -114,6 +128,16 @@ else()
   set(TRITON_ASCEND_HAS_INPROC_COSTMODEL 0)
 endif()
 
+if(TRITON_BUILD_PYTHON_MODULE)
+  # Propagate binding-framework headers to the TritonAscend plugin: it is
+  # now nanobind-based to match upstream's init_triton_<backend>() ABI.
+  # nanobind-static (created in the root CMakeLists before this
+  # subdirectory) carries the nanobind include directory PUBLIC.
+  # add_triton_object links LINK_LIBS PUBLIC, so the usage requirements
+  # flow to the TritonAscend sources.
+  set(_ascend_python_link_libs nanobind-static)
+endif()
+
 add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc
@@ -122,6 +146,7 @@ add_triton_plugin(TritonAscend
   TritonToLinalg
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
+  ${_ascend_python_link_libs}
 )
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)

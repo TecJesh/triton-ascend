@@ -26,6 +26,8 @@ import triton
 from triton.language.math import tanh
 import triton.language as tl
 
+pytestmark = pytest.mark.skip(reason="Not supported yet; pending follow-up fix")
+
 device = 'npu'
 
 

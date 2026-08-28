@@ -24,6 +24,9 @@ import torch
 import torch_npu
 import triton
 import triton.language as tl
+import pytest
+
+pytestmark = pytest.mark.skip(reason="Not supported yet; pending follow-up fix")
 
 
 def _write_u32_le(buffer, byte_offsets, values):

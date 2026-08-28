@@ -25,6 +25,9 @@ import triton
 import triton.language as tl
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 
 @triton.jit
 def broadcast_load_ref_kernel(in_ptr, out_ptr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):

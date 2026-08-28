@@ -22,8 +22,9 @@
  * THE SOFTWARE.
  */
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 #include "ir.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -33,13 +34,13 @@
 #include "mlir/IR/Types.h"
 
 using namespace mlir;
-namespace py = pybind11;
+namespace py = nanobind;
 
 constexpr unsigned kIntegerAttrBitWidth = 64;
 
 struct BufferOpBuilder : public TritonOpBuilder {};
 
-void init_buffer_ir(py::module &&m) {
+void init_buffer_ir(py::module_ &m) {
   m.def("load_dialects", [](MLIRContext &context) {
     DialectRegistry registry;
     registry.insert<memref::MemRefDialect>();
@@ -48,8 +49,8 @@ void init_buffer_ir(py::module &&m) {
     context.loadAllAvailableDialects();
   });
 
-  py::class_<BufferOpBuilder, TritonOpBuilder>(
-      m, "buffer_builder", py::module_local(), py::dynamic_attr())
+  py::class_<BufferOpBuilder, TritonOpBuilder>(m, "buffer_builder",
+                                               py::dynamic_attr())
       .def(py::init<MLIRContext *>())
       .def("get_null_attr", [](BufferOpBuilder &self) { return Attribute(); })
       .def("get_str_array_attr",

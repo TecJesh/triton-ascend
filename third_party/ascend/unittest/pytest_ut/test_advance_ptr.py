@@ -25,6 +25,9 @@ import torch
 import torch_npu
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 
 @triton.jit
 def fn_npu_3d(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):

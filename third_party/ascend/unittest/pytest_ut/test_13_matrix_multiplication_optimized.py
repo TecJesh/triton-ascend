@@ -118,7 +118,11 @@ def matmul_kernel(
             task_m_idx = localRelativeBlock % curThresholdM + block_idx // (BLOCK_TRESHHOLD *
                                                                             NUM_BLOCKS_N) * BLOCK_TRESHHOLD
             # 求最小公倍数，方便求基本块的坐标
-            x, y = curThresholdM, curThresholdN if curThresholdM > curThresholdN else curThresholdN, curThresholdM
+            # NOTE: the frontend does not support dynamic ternaries with tuple
+            # results; lower to two element-wise selects (same semantics).
+            m_gt_n = curThresholdM > curThresholdN
+            x = tl.where(m_gt_n, curThresholdM, curThresholdN)
+            y = tl.where(m_gt_n, curThresholdN, curThresholdM)
             while y != 0:
                 x, y = y, x % y
             lcm = curThresholdM * curThresholdN // x

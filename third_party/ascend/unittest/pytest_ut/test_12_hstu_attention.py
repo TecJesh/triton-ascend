@@ -33,6 +33,9 @@ import triton.runtime.driver as driver
 import numpy as np
 import torch.nn.functional as F
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 DEVICE = "npu"
 BLOCK_FWD = 64
 BLOCK_BWD = 32
