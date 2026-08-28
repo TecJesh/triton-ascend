@@ -29,6 +29,7 @@ struct Canonicalize : public gluon::impl::GluonCanonicalizeBase<Canonicalize> {
 } // namespace
 
 void Canonicalize::runOnOperation() {
+  runDeadIterArgElimination(getOperation());
   MLIRContext *ctx = &getContext();
   RewritePatternSet patterns(&getContext());
 
@@ -48,7 +49,6 @@ void Canonicalize::runOnOperation() {
   for (mlir::RegisteredOperationName op : ctx->getRegisteredOperationsByDialect(
            cf::ControlFlowDialect::getDialectNamespace()))
     op.getCanonicalizationPatterns(patterns, ctx);
-  populateForOpDeadArgumentElimination(patterns);
 
   // Populate select Triton canonicalization patterns. The important patterns to
   // EXCLUDE are those that modify layouts, especially `ConvertLayoutOp`
@@ -57,8 +57,12 @@ void Canonicalize::runOnOperation() {
   StoreOp::getCanonicalizationPatterns(patterns, ctx);
   BroadcastOp::getCanonicalizationPatterns(patterns, ctx);
   ExpandDimsOp::getCanonicalizationPatterns(patterns, ctx);
+  ReshapeOp::getCanonicalizationPatterns(patterns, ctx);
+  IntToPtrOp::getCanonicalizationPatterns(patterns, ctx);
   ttg::WarpSpecializeOp::getCanonicalizationPatterns(patterns, ctx);
   ttg::WarpSpecializePartitionsOp::getCanonicalizationPatterns(patterns, ctx);
+  ttng::BarrierExpectOp::getCanonicalizationPatterns(patterns, ctx);
+  ttng::ArriveBarrierOp::getCanonicalizationPatterns(patterns, ctx);
 
   (void)applyPatternsGreedily(getOperation(), std::move(patterns));
 }

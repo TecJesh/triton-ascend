@@ -36,10 +36,6 @@ public:
     addIllegalDialect<mlir::triton::proton::gpu::ProtonGPUDialect>();
     addIllegalDialect<mlir::triton::proton::ProtonDialect>();
     addLegalOp<mlir::UnrealizedConversionCastOp>();
-    addDynamicallyLegalOp<triton::gpu::GlobalScratchAllocOp>(
-        [](triton::gpu::GlobalScratchAllocOp op) {
-          return op.getBackend() != "proton";
-        });
   }
 };
 
@@ -74,7 +70,10 @@ struct ConvertProtonNvidiaGPUToLLVM
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           patterns);
     auto convTarget = ProtonLLVMConversionTarget(*context);
-    if (failed(applyPartialConversion(mod, convTarget, std::move(patterns))))
+    ConversionConfig config;
+    config.allowPatternRollback = false;
+    if (failed(applyPartialConversion(mod, convTarget, std::move(patterns),
+                                      config)))
       return signalPassFailure();
 
     OpPassManager pm;

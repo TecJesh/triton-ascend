@@ -1,5 +1,6 @@
 #include "triton/Tools/LayoutUtils.h"
 #include "triton/Tools/GenericSwizzling.h"
+#include "llvm/ADT/DenseSet.h"
 
 namespace mlir::triton {
 
@@ -35,6 +36,35 @@ bool squareSublayoutIsIdentity(const LinearLayout &ll,
       ll, dimNames, [](int b, int32_t basis) { return basis == (1 << b); });
 }
 
+LinearLayout invertAndComposeBlockLocal(const LinearLayout &A,
+                                        const LinearLayout &B) {
+  auto cvt = B.invertAndCompose(A);
+  assert(!cvt.getInDimNames().empty());
+  auto kBlock =
+      StringAttr::get(cvt.getInDimNames().begin()->getContext(), "block");
+  assert(A.hasInDim(kBlock) && B.hasInDim(kBlock));
+  assert(A.getInDimSize(kBlock) == B.getInDimSize(kBlock));
+
+  // A zero block basis does not affect A's outputs, so force that output
+  // coordinate to equal the corresponding input block bit. This does not
+  // change the composition.
+  auto bases = cvt.getBases();
+  int blockOutIdx = cvt.getOutDimIndex(kBlock);
+  uint64_t nonZeroBlockBases =
+      getInputBasisMask(A, kBlock, llvm::to_vector(A.getOutDimNames()));
+  for (unsigned i = 0; i < A.getInDimSizeLog2(kBlock); ++i) {
+    if (nonZeroBlockBases & (uint64_t{1} << i))
+      continue;
+    int blockBit = 1 << i;
+    for (auto &inDimBases : llvm::make_second_range(bases))
+      for (auto &basis : inDimBases)
+        basis[blockOutIdx] &= ~blockBit;
+    bases[kBlock][i][blockOutIdx] |= blockBit;
+  }
+  return LinearLayout(std::move(bases), cvt.getOutDims(),
+                      /*requireSurjective=*/false);
+}
+
 LinearLayout
 ensureLayoutNotLargerThan(const LinearLayout &layout,
                           const llvm::SmallDenseMap<StringAttr, int64_t> &shape,
@@ -44,61 +74,49 @@ ensureLayoutNotLargerThan(const LinearLayout &layout,
     return layout;
   }
   MLIRContext *ctx = shape.begin()->first.getContext();
-
   auto bases = layout.getBases();
-
   auto kRegister = StringAttr::get(ctx, "register");
-  std::set<int32_t> broadcastedDims;
 
-  for (auto outDim : llvm::enumerate(layout.getOutDimNames())) {
-    auto outDimName = outDim.value();
-    int32_t actualSize = layout.getOutDimSize(outDimName);
-    int32_t desiredSize = shape.lookup(outDimName);
-    if (actualSize <= desiredSize) {
-      continue;
-    }
-    assert(actualSize % desiredSize == 0);
-    // <inDimName, basisIdx, outValue>
-    std::vector<std::tuple<StringAttr, int, int>> sortedBases;
-    for (auto [inDimName, basis] : bases) {
-      for (size_t basisIdx = 0; basisIdx < basis.size(); basisIdx++) {
-        auto outValue = basis[basisIdx][outDim.index()];
-        if (outValue == 0) {
-          continue;
-        }
-        assert(llvm::isPowerOf2_32(outValue));
-        sortedBases.emplace_back(inDimName, basisIdx, outValue);
-      }
-    }
-    // From the largest basis to the smallest.
-    llvm::sort(sortedBases,
-               [](auto a, auto b) { return std::get<2>(a) > std::get<2>(b); });
-    for (auto [inDimName, basisIdx, outValue] : sortedBases) {
-      if (actualSize <= desiredSize) {
-        break;
-      }
-      if (!broadcastRegisters && inDimName == kRegister) {
-        broadcastedDims.insert(basisIdx);
-      } else {
-        bases[inDimName][basisIdx][outDim.index()] = 0;
-      }
-      actualSize >>= 1;
-    }
-  }
-  if (!broadcastRegisters) {
-    // Remove broadcasted registers
-    std::vector<std::vector<int32_t>> newBasesRegister;
-    for (auto [idx, basis] : llvm::enumerate(bases[kRegister])) {
-      // Remove if it's broadcasted
-      if (broadcastedDims.find(idx) == broadcastedDims.end()) {
-        newBasesRegister.push_back(std::move(basis));
-      }
-    }
-    bases[kRegister] = std::move(newBasesRegister);
-  }
   auto outDims = layout.getOutDims();
   for (auto &[outDim, outDimSize] : outDims) {
-    outDimSize = std::min<int32_t>(outDimSize, shape.lookup(outDim));
+    auto newOutDim = shape.lookup(outDim);
+    // Shape should be a non-zero power of 2
+    assert(llvm::isPowerOf2_32(newOutDim) && newOutDim != 0);
+    outDimSize = std::min<int32_t>(outDimSize, newOutDim);
+  }
+
+  // Ensure no base exceeds the resized out-dim sizes.
+  SmallVector<int32_t> outDimSizes;
+  for (auto &pair : outDims) {
+    outDimSizes.push_back(pair.second);
+  }
+  for (auto &[inDimName, inDimBases] : bases) {
+    bool dropBroadcasting = (!broadcastRegisters && inDimName == kRegister);
+    std::vector<std::vector<int32_t>> newBasesRegister;
+    for (auto &basis : inDimBases) {
+      bool wasZero = true;
+      bool isZero = true;
+      for (size_t i = 0; i < basis.size(); ++i) {
+        int32_t original = basis[i];
+        if (original != 0) {
+          wasZero = false;
+        }
+        if (original >= outDimSizes[i]) {
+          basis[i] = 0;
+        }
+        if (basis[i] != 0) {
+          isZero = false;
+        }
+      }
+      if (dropBroadcasting) {
+        if (wasZero || !isZero) {
+          newBasesRegister.push_back(std::move(basis));
+        }
+      }
+    }
+    if (dropBroadcasting) {
+      inDimBases = std::move(newBasesRegister);
+    }
   }
 
   return LinearLayout(std::move(bases), std::move(outDims),
@@ -187,12 +205,102 @@ LinearLayout zerosLike(const LinearLayout &layout) {
     }
   }
 
-  SmallVector<std::pair<StringAttr, int32_t>> outDims;
-  for (auto outDim : layout.getOutDimNames()) {
-    outDims.emplace_back(outDim, layout.getOutDimSize(outDim));
-  }
-  return LinearLayout(std::move(bases), std::move(outDims),
+  return LinearLayout(std::move(bases), layout.getOutDims(),
                       /*requireSurjective=*/false);
+}
+
+uint32_t getOutputBasisMask(const LinearLayout &layout,
+                            ArrayRef<StringAttr> inDims, StringAttr outDim) {
+  assert(layout.hasOutDim(outDim));
+  unsigned outIdx = layout.getOutDimIndex(outDim);
+  uint32_t mask = 0;
+  for (StringAttr inDim : inDims) {
+    assert(layout.hasInDim(inDim));
+    for (const auto &basis : layout.getBases().lookup(inDim))
+      mask |= uint32_t(basis[outIdx]);
+  }
+  return mask;
+}
+
+uint64_t getInputBasisMask(const LinearLayout &layout, StringAttr inDim,
+                           ArrayRef<StringAttr> outDims) {
+  assert(layout.hasInDim(inDim));
+  SmallVector<unsigned> outIndices;
+  for (StringAttr outDim : outDims) {
+    assert(layout.hasOutDim(outDim));
+    outIndices.push_back(layout.getOutDimIndex(outDim));
+  }
+
+  uint64_t mask = 0;
+  for (const auto &indexedBasis :
+       llvm::enumerate(layout.getBases().lookup(inDim))) {
+    const auto &basis = indexedBasis.value();
+    if (llvm::any_of(outIndices,
+                     [&](unsigned outIdx) { return basis[outIdx] != 0; }))
+      mask |= uint64_t{1} << indexedBasis.index();
+  }
+  return mask;
+}
+
+IdentityFactor factorMaximalIdentityPrefix(const LinearLayout &layout,
+                                           StringAttr inDim, StringAttr outDim,
+                                           int32_t maxSize) {
+  assert(layout.hasInDim(inDim) && layout.hasOutDim(outDim));
+  assert(maxSize > 0 && llvm::isPowerOf2_32(maxSize));
+
+  IdentityFactor result{1, layout};
+  for (int32_t size = 2; size <= maxSize;) {
+    auto quotient =
+        divideLeft(layout, LinearLayout::identity1D(size, inDim, outDim));
+    if (!quotient)
+      break;
+    result = {size, std::move(*quotient)};
+    if (size == maxSize)
+      break;
+    size *= 2;
+  }
+  return result;
+}
+
+LinearLayout renameLinearLayoutDims(
+    const LinearLayout &layout,
+    ArrayRef<std::pair<StringAttr, StringAttr>> inDimRenames,
+    ArrayRef<std::pair<StringAttr, StringAttr>> outDimRenames) {
+  auto getRenames = [](auto dimNames, auto renames) {
+    llvm::SmallDenseSet<StringAttr> existing(dimNames.begin(), dimNames.end());
+    llvm::DenseMap<StringAttr, StringAttr> result;
+    for (auto [oldDim, newDim] : renames) {
+      assert(existing.contains(oldDim) && "dimension to rename does not exist");
+      assert(!result.contains(oldDim) && "dimension renamed more than once");
+      result.try_emplace(oldDim, newDim);
+    }
+
+    llvm::SmallDenseSet<StringAttr> finalNames;
+    for (StringAttr dim : dimNames) {
+      StringAttr renamed = result.lookup(dim);
+      StringAttr finalName = renamed ? renamed : dim;
+      assert(!finalNames.contains(finalName) &&
+             "renaming creates duplicate dimensions");
+      finalNames.insert(finalName);
+    }
+    return result;
+  };
+
+  auto inRenames = getRenames(layout.getInDimNames(), inDimRenames);
+  auto outRenames = getRenames(layout.getOutDimNames(), outDimRenames);
+
+  LinearLayout::BasesT bases;
+  for (auto [inDim, inDimBases] : layout.getBases()) {
+    StringAttr renamed = inRenames.lookup(inDim);
+    bases.insert({renamed ? renamed : inDim, inDimBases});
+  }
+  SmallVector<std::pair<StringAttr, int32_t>> outDims;
+  for (auto [outDim, size] : layout.getOutDims()) {
+    StringAttr renamed = outRenames.lookup(outDim);
+    outDims.push_back({renamed ? renamed : outDim, size});
+  }
+  return LinearLayout(std::move(bases), outDims,
+                      /*requireSurjective=*/layout.isSurjective());
 }
 
 std::optional<ColumnAction> regPermForDivide(const LinearLayout &A,
@@ -227,7 +335,6 @@ std::optional<ColumnAction> regPermForDivide(const LinearLayout &A,
   auto multiplyByTileSize =
       [&](ArrayRef<int32_t> bBasis) -> std::vector<int32_t> {
     std::vector<int32_t> result;
-    size_t idx = 0;
     assert(bBasis.size() == A.getNumOutDims());
     for (auto [dim, b] : llvm::zip(A.getOutDimNames(), bBasis)) {
       result.push_back(b << log2QuotSize.lookup(dim));
@@ -285,31 +392,44 @@ ColumnAction actionRemoveBroadcastedRegs(const LinearLayout &layout) {
 }
 std::pair<int64_t, ColumnAction>
 actionAdditiveStrides(const LinearLayout &layout, const LinearLayout addrLayout,
-                      uint64_t maskSpanOffsets) {
-  // We are looking to put at the front (after any zeros) any basis that does
-  // not intersect with any bit moved by any basis in kLane / kWarp
-  // and that is not moved by any affine offset
-
-  // Note this function assumes that if any registers are used in the addrLayout
-  // of the layout (as in ldmatrix/stmatrix) they will be the first non-zero
-  // registers within `layout`
+                      uint64_t maskSpanOffsets, uint64_t maskSpanBlocks,
+                      int64_t regsPerInst) {
+  // General idea:
+  // We want to swap an xor into an addition when computing the register
+  // offsets and blocks. We can do this if each output component of this
+  // register is disjoint from the corresponding components from
+  // lanes/warps/blocks and any affine offset.
+  //
+  // Additionally, the lowering only ever evaluates register offsets at indices
+  // that are multiples of `regsPerInst` (the inner-loop stride, matching one
+  // vectorised instruction). The first `log2(regsPerInst)` register bases are
+  // therefore never selected by any computed index and are trivially additive,
+  // independent of their basis value. We force them into the "additive" group
+  // unconditionally so that the returned `nAdditive` is always at least
+  // `regsPerInst`. In particular, callers do not need to pre-zero those bases
+  // for the invariant to hold.
   assert(layout.getNumInDims() != 0);
+  assert(llvm::isPowerOf2_64(regsPerInst) &&
+         "regsPerInst must be a power of two");
   auto kReg = *layout.getInDimNames().begin();
   assert(kReg.str() == "register");
-  auto kLane = StringAttr::get(kReg.getContext(), "lane");
-  auto kWarp = StringAttr::get(kReg.getContext(), "warp");
-  assert(layout.getNumOutDims() == 1);
-  uint32_t bits = maskSpanOffsets;
-  llvm::SetVector<uint32_t> tileBases;
-  for (auto bases : llvm::make_second_range(addrLayout.getBases())) {
-    for (auto basis : bases) {
-      bits |= basis[0];
-      tileBases.insert(basis[0]);
-    }
-  }
+  assert(layout.getNumOutDims() == 2);
+  assert(layout.getOutDims() == addrLayout.getOutDims());
+  const size_t regBasisPerVec = llvm::Log2_64(regsPerInst);
+  uint64_t offsetBits = maskSpanOffsets;
+  uint64_t blockBits = maskSpanBlocks;
+  auto addrInDims = llvm::to_vector(addrLayout.getInDimNames());
+  auto addrOutDims = llvm::to_vector(addrLayout.getOutDimNames());
+  offsetBits |= getOutputBasisMask(addrLayout, addrInDims, addrOutDims[0]);
+  blockBits |= getOutputBasisMask(addrLayout, addrInDims, addrOutDims[1]);
   SmallVector<size_t> front, back;
-  for (auto [idx, basis] : llvm::enumerate(layout.getBases().lookup(kReg))) {
-    if ((basis[0] & bits) == 0 || tileBases.contains(basis[0])) {
+  auto layoutNamedBases = layout.getBases();
+  assert(layoutNamedBases.lookup(kReg).size() >= regBasisPerVec &&
+         "layout must have at least log2(regsPerInst) register bases");
+  for (auto [idx, basis] : llvm::enumerate(layoutNamedBases.lookup(kReg))) {
+    bool isAdditive =
+        (basis[0] & offsetBits) == 0 && (basis[1] & blockBits) == 0;
+    if (idx < regBasisPerVec || isAdditive) {
       front.push_back(idx);
     } else {
       back.push_back(idx);
@@ -484,24 +604,12 @@ std::optional<LinearLayout> getReps(const LinearLayout &cvt,
   for (auto od : tile.getOutDimNames())
     assert(cvt.hasOutDim(od) && "tile out-dims must be contained in cvt");
 
-  // Precompute tile out-dim bit-widths.
-  llvm::SmallDenseMap<StringAttr, int> outBLog2;
-  for (StringAttr od : cvt.getOutDimNames())
-    outBLog2[od] = tile.hasOutDim(od) ? tile.getOutDimSizeLog2(od) : 0;
-
   // Build a per-out-dimension mask by OR-ing all tile bases that touch it.
   llvm::SmallDenseMap<StringAttr, int32_t> tileMaskPerOutDim;
+  auto tileInDims = llvm::to_vector(tile.getInDimNames());
   for (StringAttr od : cvt.getOutDimNames())
-    tileMaskPerOutDim[od] = 0;
-  for (auto &[inDim, inBases] : tile.getBases()) {
-    (void)inDim;
-    for (auto &basis : inBases) {
-      int idx = 0;
-      for (StringAttr od : tile.getOutDimNames()) {
-        tileMaskPerOutDim[od] |= basis[idx++];
-      }
-    }
-  }
+    tileMaskPerOutDim[od] =
+        tile.hasOutDim(od) ? getOutputBasisMask(tile, tileInDims, od) : 0;
 
   // Build reps with the same in/out dims as cvt, but zeroing out the leading
   // inB bases (per in-dim) and keeping the remainder bases unchanged from cvt.
@@ -520,7 +628,7 @@ std::optional<LinearLayout> getReps(const LinearLayout &cvt,
     for (int i = 0; i < inB; ++i) {
       for (StringAttr od : cvt.getOutDimNames()) {
         int a = cvt.getBasis(id, i, od);
-        int b = tile.getBasis(id, i, od);
+        int b = tile.hasOutDim(od) ? tile.getBasis(id, i, od) : 0;
         if (a != b) {
           return std::nullopt;
         }
@@ -571,12 +679,12 @@ LinearLayout removeStandardDim(const LinearLayout &layout, int dim) {
   assert(dims == standardOutDimNames(ctx, rank));
   dims.erase(dims.begin() + dim);
   auto newLayout = layout.sublayout(to_vector(layout.getInDimNames()), dims);
-  auto dimSizes = newLayout.getOutDims();
   auto newDims = standardOutDimNames(ctx, rank - 1);
-  for (auto [i, newDim] : llvm::enumerate(newDims)) {
-    dimSizes[i].first = newDim;
+  SmallVector<std::pair<StringAttr, StringAttr>> renames;
+  for (auto [oldDim, newDim] : llvm::zip_equal(dims, newDims)) {
+    renames.push_back({oldDim, newDim});
   }
-  return LinearLayout(newLayout.getBases(), dimSizes, /*isSurjective*/ false);
+  return renameLinearLayoutDims(newLayout, {}, renames);
 }
 
 } // namespace mlir::triton

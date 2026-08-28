@@ -991,6 +991,7 @@ def test_addptr_implicit_perm_load_store_4d(X, Y, Z, W, XBLOCK, YBLOCK, ZBLOCK, 
 # ----------------------------------------------------------
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_load_2d(X, Y, XBLOCK, YBLOCK, dtype, sigtype):
     """
     Test goal:
@@ -1036,6 +1037,7 @@ def test_make_tensor_ptr_implicit_perm_load_2d(X, Y, XBLOCK, YBLOCK, dtype, sigt
 
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_store_2d(X, Y, XBLOCK, YBLOCK, dtype, sigtype):
     """
     Test goal:
@@ -1081,6 +1083,7 @@ def test_make_tensor_ptr_implicit_perm_store_2d(X, Y, XBLOCK, YBLOCK, dtype, sig
 
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_load_store_2d_static_stride(X, Y, XBLOCK, YBLOCK, dtype, sigtype):
     """
     Test goal matches addptr_2d_static_stride, but uses tl.make_block_ptr + tl.load(tptr).
@@ -1114,6 +1117,7 @@ def test_make_tensor_ptr_implicit_perm_load_store_2d_static_stride(X, Y, XBLOCK,
 
 @pytest.mark.parametrize("X, Y, Z, XBLOCK, YBLOCK, ZBLOCK", case_3d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_load_store_3d_static_stride(X, Y, Z, XBLOCK, YBLOCK, ZBLOCK, dtype, sigtype):
     """
     Real layout: A[X,Y,Z] row-major stride=(Y*Z, Z, 1)
@@ -1155,6 +1159,7 @@ def test_make_tensor_ptr_implicit_perm_load_store_3d_static_stride(X, Y, Z, XBLO
 
 @pytest.mark.parametrize("X, Y, Z, XBLOCK, YBLOCK, ZBLOCK", case_3d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_load_store_3d(X, Y, Z, XBLOCK, YBLOCK, ZBLOCK, dtype, sigtype):
     """
     Same as static stride but STRIDE_* passed at runtime.
@@ -1195,6 +1200,7 @@ def test_make_tensor_ptr_implicit_perm_load_store_3d(X, Y, Z, XBLOCK, YBLOCK, ZB
 
 @pytest.mark.parametrize("X, Y, Z, XBLOCK, YBLOCK, ZBLOCK", case_3d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_make_tensor_ptr_implicit_perm_load_3d_static_stride(X, Y, Z, XBLOCK, YBLOCK, ZBLOCK, dtype, sigtype):
     A = test_common.generate_tensor(shape=(X, Y, Z), dtype=sigtype).npu()
     _assert_row_major_3d(A, X, Y, Z)
@@ -1249,6 +1255,7 @@ def test_make_tensor_ptr_implicit_perm_load_3d_static_stride(X, Y, Z, XBLOCK, YB
 # ----------------------------------------------------------
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_advance_implicit_perm_load_store_2d_static_stride(X, Y, XBLOCK, YBLOCK, dtype, sigtype):
     """
     Same goal as addptr_2d_static_stride, but uses tl.make_block_ptr + tl.advance.
@@ -1279,6 +1286,7 @@ def test_advance_implicit_perm_load_store_2d_static_stride(X, Y, XBLOCK, YBLOCK,
 
 @pytest.mark.parametrize("X, Y, Z, XBLOCK, YBLOCK, ZBLOCK", case_3d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+@pytest.mark.skip(reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
 def test_advance_implicit_perm_load_store_3d_static_stride(X, Y, Z, XBLOCK, YBLOCK, ZBLOCK, dtype, sigtype):
     """
     Real layout: A[X,Y,Z] row-major stride=(Y*Z, Z, 1)

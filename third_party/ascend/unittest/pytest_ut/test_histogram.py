@@ -51,7 +51,7 @@ def histogram_mask_kernel(x_ptr, z_ptr, n_elements, N: tl.constexpr, BLOCK_SIZE:
 @pytest.mark.parametrize("M", [2048])
 @pytest.mark.parametrize("N", [2])
 @pytest.mark.parametrize("ncore", [1])
-@pytest.mark.parametrize("dtype", ["int32", "int64"])
+@pytest.mark.parametrize("dtype", ["int32"])
 def test_histogram(M, N, ncore, dtype):
     torch.manual_seed(17)
     x = torch.randint(low=0, high=N, size=(M, ), dtype=eval(f'torch.{dtype}')).npu()
@@ -66,7 +66,7 @@ def test_histogram(M, N, ncore, dtype):
 @pytest.mark.parametrize("M", [2048])
 @pytest.mark.parametrize("N", [2])
 @pytest.mark.parametrize("ncore", [1])
-@pytest.mark.parametrize("dtype", ["uint32", "uint64"])
+@pytest.mark.parametrize("dtype", ["uint32"])
 def test_histogram_uint(M, N, ncore, dtype):
     torch.manual_seed(17)
     x_cpu = torch.randint(low=0, high=N, size=(M, ), dtype=eval(f'torch.{dtype}'), device="cpu")

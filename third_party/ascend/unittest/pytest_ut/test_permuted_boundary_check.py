@@ -4,6 +4,9 @@ import triton
 import triton.language as tl
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 
 @triton.jit
 def zj_fa_fwd_pattern(in_ptr0, in_ptr1, out_ptr, M, K, N, MBLOCK: tl.constexpr, NBLOCK: tl.constexpr,

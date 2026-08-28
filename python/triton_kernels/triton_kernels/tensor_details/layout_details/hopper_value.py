@@ -53,6 +53,29 @@ class HopperMXValueLayoutTransformation(LayoutTransformation):
         object.__setattr__(self, "K", K)
         object.__setattr__(self, "N", N)
 
+    def _padded_shape(self, shape) -> list[int]:
+        *leading_shape, M, K = shape
+        if self.mx_axis == len(leading_shape):
+            align_m, align_k = 64, 256
+        else:
+            align_m, align_k = 256, 64
+        M = (M + align_m - 1) // align_m * align_m
+        K = (K + align_k - 1) // align_k * align_k
+        return [*leading_shape, M, K]
+
+    @property
+    def storage_shape(self) -> list[int]:
+        *leading_shape, M, K = self.shape
+        if self.is_fp4:
+            K //= 2
+            if self.mx_axis == len(leading_shape):
+                M //= 2
+                K *= 2
+        *leading_shape, M, K = self._padded_shape((*leading_shape, M, K))
+        if self.mx_axis == len(leading_shape):
+            return [*leading_shape, M * 4, K // 4]
+        return [*leading_shape, M // 4, K * 4]
+
     def _maybe_mT(self, data):
         if self.mx_axis == len(self.leading_shape):
             return data.mT
@@ -83,12 +106,11 @@ class HopperMXValueLayoutTransformation(LayoutTransformation):
         batch = data.ndim - 2
         assert batch >= 0
         assert self.mma_version in (2, 3)
-        # Pre-pad both matrix dims to multiples of 64
+        # Align the dimension packed by four to a 64-byte load extent.
         *_, M_in, K_in = data.shape
-        SWIZZLE_ALIGN_M = 64
-        SWIZZLE_ALIGN_K = 64
-        pad_m = (SWIZZLE_ALIGN_M - (M_in % SWIZZLE_ALIGN_M)) % SWIZZLE_ALIGN_M
-        pad_k = (SWIZZLE_ALIGN_K - (K_in % SWIZZLE_ALIGN_K)) % SWIZZLE_ALIGN_K
+        *_, M, K = self._padded_shape(data.shape)
+        pad_m = M - M_in
+        pad_k = K - K_in
         data = torch.nn.functional.pad(data, (0, pad_k, 0, pad_m))
 
         data = self._maybe_mT(data)
@@ -106,19 +128,13 @@ class HopperMXValueLayoutTransformation(LayoutTransformation):
         k_tile = (1, 4 // u8_kwidth)
 
         sizes = list(data.shape[:-2])
-        pads = []
         # [rest, K, tile, threads] per dimension
         for i, (a, b, c, s, d) in enumerate(zip(k_tile, warp_tile, threads, scott_trick, contig)):
             packed = a * b * c * s * d
             size = data.shape[batch + i]
-            pad = (packed - size % packed) % packed
-            pads += [(0, pad)]
-            sizes.append((size + pad) // packed)
+            sizes.append(size // packed)
             sizes += [a, b, c, s, d]
 
-        pads = tuple(x for t in pads[::-1] for x in t)
-        data = torch.nn.functional.pad(data, pads)
-        init_shape = data.shape
         # 0: rest[0]
         # 1: k_tile[0]
         # 2: warp_tile[0]
@@ -143,13 +159,13 @@ class HopperMXValueLayoutTransformation(LayoutTransformation):
         assert data.shape[-2] == init_shape[-2] // 4
         assert data.shape[-1] == init_shape[-1] * 4
         # twiddle the bits
-        data = _pack_bits(data, self.mx_axis)
+        data = _convert_bits(data, inverse=False)
         data = self._maybe_mT(data)
-        return data
+        return self._validate_storage_shape(data)
 
     def unswizzle_data(self, data):
         data = self._maybe_mT(data)
-        data = _unpack_bits(data, self.mx_axis)
+        data = _convert_bits(data, inverse=True)
         *batch, M, K = data.shape
         # We have two times the elements if we already upcasted to bfloat16
         mult = 2 if data.dtype == torch.bfloat16 else 1
@@ -165,7 +181,7 @@ class HopperMXValueLayoutTransformation(LayoutTransformation):
         data = data.permute(*perm)
         data = data.reshape(*batch, M * 4, K // 4)
         data = self._maybe_mT(data)
-        data = repack(data, -2, -1, self.is_fp4)
+        data = repack(data, self.mx_axis, -1, self.is_fp4)
         data = data[..., :self.K, :self.N // 2]
         data = data.contiguous()
         return data
@@ -195,9 +211,8 @@ def _compress_fourth(x):
     return ((x & 0x8) << 11) | ((x & 0x6) << 9) | ((x & 0x1) << 13)
 
 
-def _pack_bits(x: torch.Tensor, mx_axis: int):
+def _pack_bits(x: torch.Tensor):
     x = x.contiguous()
-    assert x.shape[-1] % 4 == 0, "Input tensor must have a last dimension divisible by 4"
     x = x.reshape(x.shape[:-1] + (x.shape[-1] // 4, 4))
     ret = _compress_fp4(x[..., 0]) | (_compress_fp4(x[..., 0] >> 4) << 16)
     ret |= right_shift_unsigned(_compress_fp4(x[..., 1]) | (_compress_fp4(x[..., 1] >> 4) << 16), 3)
@@ -231,7 +246,7 @@ def _bf16x2_to_fp4e2m1x2(x):
     return ret_lo | (ret_hi << 4)
 
 
-def _unpack_bits(x, mx_axis: int):
+def _unpack_bits(x):
     x = x.view(torch.int32)
     m = 0b10000001110000001000000111000000
     a = (x << 1) & 0b10000000000000001000000000000000
@@ -242,6 +257,57 @@ def _unpack_bits(x, mx_axis: int):
     x = x.flatten(-2, -1)
     x = _bf16x2_to_fp4e2m1x2(x)
     return x
+
+
+@triton.jit
+def _compress_fp4x2_triton(x, FOURTH: tl.constexpr):
+    # Put the two nibbles in separate bf16 lanes before interleaving them.
+    x = (x & 0xF) | ((x & 0xF0) << 12)
+    if FOURTH:
+        return ((x & 0x00080008) << 11) | ((x & 0x00060006) << 9) | ((x & 0x00010001) << 13)
+    return ((x & 0x00080008) << 12) | ((x & 0x00070007) << 6)
+
+
+@triton.jit
+def _bf16x2_to_fp4e2m1x2_triton(x):
+    x = ((x >> 12) & 0x00080008) | ((x >> 6) & 0x00070007)
+    return (x & 0xF) | ((x >> 12) & 0xF0)
+
+
+@triton.jit
+def _convert_bits_kernel(X, Y, N, INVERSE: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.program_id(0).to(tl.int64) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < N
+    # Byte loads also support contiguous views with unaligned storage offsets.
+    a = tl.load(X + 4 * offsets, mask, other=0).to(tl.uint32)
+    b = tl.load(X + 4 * offsets + 1, mask, other=0).to(tl.uint32)
+    c = tl.load(X + 4 * offsets + 2, mask, other=0).to(tl.uint32)
+    d = tl.load(X + 4 * offsets + 3, mask, other=0).to(tl.uint32)
+    if INVERSE:
+        x = a | (b << 8) | (c << 16) | (d << 24)
+        fourth = ((x << 1) & 0x80008000) | ((x >> 3) & 0x01800180) | ((x >> 7) & 0x00400040)
+        ret = (_bf16x2_to_fp4e2m1x2_triton(x) | (_bf16x2_to_fp4e2m1x2_triton(x << 3) << 8)
+               | (_bf16x2_to_fp4e2m1x2_triton(x << 6) << 16)
+               | (_bf16x2_to_fp4e2m1x2_triton(fourth) << 24))
+    else:
+        ret = (_compress_fp4x2_triton(a, False) | (_compress_fp4x2_triton(b, False) >> 3)
+               | (_compress_fp4x2_triton(c, False) >> 6) | _compress_fp4x2_triton(d, True))
+    tl.store(Y + offsets, ret, mask)
+
+
+def _convert_bits(x: torch.Tensor, inverse: bool) -> torch.Tensor:
+    """Avoid full-size integer temporaries when re-encoding CUDA values."""
+    if x.device.type != "cuda" or x.dtype != torch.uint8:
+        return _unpack_bits(x) if inverse else _pack_bits(x)
+    x = x.contiguous()
+    shape = (*x.shape[:-1], x.shape[-1] // 4)
+    x = x.reshape(*shape, 4)
+    out = torch.empty(shape, dtype=torch.int32, device=x.device)
+    block_size = 1024
+    with torch.cuda.device(x.device):
+        _convert_bits_kernel[(triton.cdiv(out.numel(), block_size), )](x, out, out.numel(), inverse,
+                                                                       BLOCK_SIZE=block_size)
+    return out.view(torch.uint8)
 
 
 # -----------------------------------------------------------------------

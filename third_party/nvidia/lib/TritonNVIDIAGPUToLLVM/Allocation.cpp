@@ -7,6 +7,7 @@
 #include "triton/Conversion/TritonGPUToLLVM/AllocateSharedMemoryUtility.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Dialect/TritonInstrument/IR/ConSanConstants.h"
 #include "triton/Tools/GenericSwizzling.h"
 #include "triton/Tools/LayoutUtils.h"
 
@@ -16,6 +17,7 @@ using namespace mlir::triton;
 namespace mlir {
 namespace triton {
 #define GEN_PASS_DEF_ALLOCATESHAREDMEMORYNV
+#define GEN_PASS_DEF_SETMINIMUMSHAREDMEMORY
 #include "TritonNVIDIAGPUToLLVM/Passes.h.inc"
 } // namespace triton
 } // namespace mlir
@@ -38,6 +40,26 @@ struct AllocateSharedMemoryNv
     mlir::triton::gpu::attachAllocationSizeAndOffsetAttr(mod, allocation);
   }
 };
+
+struct SetMinimumSharedMemory
+    : public mlir::triton::impl::SetMinimumSharedMemoryBase<
+          SetMinimumSharedMemory> {
+  using SetMinimumSharedMemoryBase::SetMinimumSharedMemoryBase;
+
+  void runOnOperation() override {
+    ModuleOp mod = getOperation();
+    if (minimumSize < 0) {
+      mod.emitError("minimum shared memory size must be non-negative");
+      return signalPassFailure();
+    }
+    auto sharedAttr = mod->getAttrOfType<IntegerAttr>("ttg.shared");
+    int64_t sharedSize = sharedAttr ? sharedAttr.getInt() : 0;
+    if (sharedSize < minimumSize)
+      mod->setAttr("ttg.shared",
+                   IntegerAttr::get(IntegerType::get(mod.getContext(), 32),
+                                    minimumSize));
+  }
+};
 } // namespace
 
 namespace mlir::triton::nvidia_gpu {
@@ -51,11 +73,18 @@ static unsigned getNumScratchElemsSwizzledCvt(RankedTensorType srcTy,
   srcLayout = actionRemoveBroadcastedRegs(srcLayout).apply(srcLayout);
   dstLayout = actionRemoveBroadcastedRegs(dstLayout).apply(dstLayout);
   auto bitwidth = getBitwidth(srcTy);
-  auto [srcTiles, dstTiles] = gpu::getSrcDstTiles(targetInfo, bitwidth);
+  auto kBlock = StringAttr::get(ctx, "block");
+  bool crossCTA =
+      !dstLayout.invertAndCompose(srcLayout).isTrivialOver({kBlock});
+  auto [srcTiles, dstTiles] =
+      gpu::getSrcDstTiles(targetInfo, bitwidth, crossCTA);
   auto [smem, _] = triton::gpu::optimalSwizzling(srcLayout, dstLayout, srcTiles,
                                                  dstTiles, bitwidth);
   auto reps = smem.getInDimSize(StringAttr::get(ctx, "reps"));
-  return smem.getTotalOutDimSize() / reps;
+  // The smem has the same CGA layout as srcLayout, so use that instead.
+  // Remove the number of elements duplicated in the CGA layout.
+  auto nBlocks = product(triton::gpu::getCTASplitNum(srcTy.getEncoding()));
+  return smem.getTotalOutDimSize() / (reps * nBlocks);
 }
 
 std::function<unsigned(Operation *)>
@@ -64,11 +93,20 @@ getNvidiaAllocationAnalysisScratchSizeFn(TargetInfoBase &targetInfo) {
     if (auto cvtOp = dyn_cast<triton::gpu::ConvertLayoutOp>(op)) {
       auto srcTy = cvtOp.getSrc().getType();
       auto dstTy = cvtOp.getType();
-      if (!cvtNeedsSharedMemory(srcTy, dstTy))
+      if (!cvtNeedsSharedMemory(cvtOp))
         return 0;
       // In cuda we always swizzle
       auto elems = getNumScratchElemsSwizzledCvt(srcTy, dstTy, targetInfo);
       return elems * getBitwidth(srcTy) / 8;
+    }
+    if (auto ws = dyn_cast<triton::gpu::WarpSpecializeOp>(op)) {
+      unsigned captureSize = defaultAllocationAnalysisScratchSizeFn(op);
+      // ConSan adds captures after allocation; reserve space pre-computed by
+      // the common TritonInstrumentPrepareConSanCaptures pass.
+      if (auto extra = ws->getAttrOfType<IntegerAttr>(
+              mlir::triton::instrument::kConSanExtraCaptureBytesAttr))
+        captureSize += extra.getInt();
+      return captureSize;
     }
     return defaultAllocationAnalysisScratchSizeFn(op);
   };

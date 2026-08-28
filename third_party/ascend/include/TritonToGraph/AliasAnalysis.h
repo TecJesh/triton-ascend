@@ -103,7 +103,8 @@ public:
     if (auto ptrType = mlir::dyn_cast<triton::PointerType>(type)) {
       // 地址空间1通常是全局内存
       // 需要根据具体硬件进行调整
-      return ptrType.getAddressSpace() == 1 || ptrType.getAddressSpace() == 0;
+      return ptrType.getAddressSpace() == triton::PtrAddrSpace::Global ||
+             ptrType.getAddressSpace() == triton::PtrAddrSpace::Descriptor;
     }
     return false;
   }

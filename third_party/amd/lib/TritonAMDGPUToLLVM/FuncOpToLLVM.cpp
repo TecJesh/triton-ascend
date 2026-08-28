@@ -2,6 +2,7 @@
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 namespace {
 
@@ -29,10 +30,13 @@ struct FuncOpConversion : public ConvertOpToLLVMPattern<triton::FuncOp> {
     if (triton::isKernel(funcOp)) {
       newFuncOp.setLinkage(LLVM::Linkage::External);
     } else {
-      // Set attribute `noinline` to prevent inlining.
-      newFuncOp.setPassthroughAttr(
-          ArrayAttr::get(ctx, rewriter.getStringAttr("noinline")));
+      SmallVector<Attribute> passthroughAttrs = {
+          rewriter.getStringAttr("noinline"),
+          rewriter.getStringAttr("convergent")};
+      newFuncOp.setPassthroughAttr(ArrayAttr::get(ctx, passthroughAttrs));
       newFuncOp.setLinkage(LLVM::Linkage::Internal);
+      if (Attribute numWarps = funcOp->getAttr(triton::gpu::AttrNumWarpsName))
+        newFuncOp->setAttr("ws_num_warps", numWarps);
     }
 
     rewriter.eraseOp(funcOp);

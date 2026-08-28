@@ -32,8 +32,9 @@
 #include "ir.h" // TritonOpBuilder
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 #include <cstdint>
 #include <limits>
@@ -55,10 +56,10 @@
 #include <vector>
 #endif
 
-namespace py = pybind11;
+namespace py = nanobind;
 using namespace mlir;
 
-void init_triton_ascend_passes_ttir(py::module &&m) {
+void init_triton_ascend_passes_ttir(py::module_ &m) {
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;
@@ -425,12 +426,13 @@ runAscendCostModelInProcess(const std::string &mlirText,
 #endif
 
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)
-void init_ascend_ir(py::module &&m);
-void init_buffer_ir(py::module &&m);
+void init_ascend_ir(py::module_ &m);
+void init_buffer_ir(py::module_ &m);
 
-void init_triton_ascend(py::module &&m) {
-  py::module_ libtriton = py::module_::import("triton._C.libtriton");
-  init_buffer_ir(libtriton.def_submodule("buffer_ir"));
+void init_triton_ascend(py::module_ &m) {
+  py::module_ libtriton = py::module_::import_("triton._C.libtriton");
+  auto bufferIr = libtriton.def_submodule("buffer_ir");
+  init_buffer_ir(bufferIr);
 
   auto passes = m.def_submodule("passes");
   // load dialects
@@ -441,7 +443,8 @@ void init_triton_ascend(py::module &&m) {
     context.loadAllAvailableDialects();
   });
 
-  init_triton_ascend_passes_ttir(passes.def_submodule("ttir"));
+  auto ttir = passes.def_submodule("ttir");
+  init_triton_ascend_passes_ttir(ttir);
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   m.def(
@@ -464,5 +467,6 @@ void init_triton_ascend(py::module &&m) {
 #endif
 
   // Initialize ascend IR bindings (ascendnpu_ir_builder, scope/hivm dialects)
-  init_ascend_ir(m.def_submodule("ir"));
+  auto ir = m.def_submodule("ir");
+  init_ascend_ir(ir);
 }

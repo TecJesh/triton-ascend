@@ -15,9 +15,13 @@ void populateBarrierOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                      PatternBenefit benefit,
                                      NVIDIA::TargetInfo &info);
 
+void createFenceMBarrierInitReleaseCluster(OpBuilder &builder, Location loc,
+                                           Value pred);
+
 void populateClusterOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                       RewritePatternSet &patterns,
-                                      PatternBenefit benefit);
+                                      PatternBenefit benefit,
+                                      const NVIDIA::TargetInfo &targetInfo);
 
 void populateConvertLayoutOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                            const TargetInfo &targetInfo,
@@ -53,10 +57,6 @@ void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                        ModuleAxisInfoAnalysis &axisInfoAnalysis,
                                        PatternBenefit benefit);
 
-void populateTensorPtrOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                        RewritePatternSet &patterns,
-                                        PatternBenefit benefit);
-
 void populateTMAToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                const TargetInfo &targetInfo,
                                RewritePatternSet &patterns,
@@ -74,7 +74,8 @@ void populateClampFOpToLLVMPattern(LLVMTypeConverter &typeConverter,
 
 void populateTCGen5MMAOpToLLVMPattern(LLVMTypeConverter &typeConverter,
                                       RewritePatternSet &patterns,
-                                      PatternBenefit benefit);
+                                      PatternBenefit benefit,
+                                      const TargetInfo &targetInfo);
 
 void populateTensorMemoryOpToLLVMPattern(LLVMTypeConverter &typeConverter,
                                          RewritePatternSet &patterns,

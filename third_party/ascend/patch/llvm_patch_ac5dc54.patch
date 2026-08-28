@@ -2,9 +2,9 @@ diff --git a/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td b/mlir/include/mlir/
 index 77d780425c3c..c8736e4e9f71 100644
 --- a/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td
 +++ b/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td
-@@ -166,8 +166,9 @@ class Arith_IntBinaryOpWithExactFlag<string mnemonic, list<Trait> traits = []> :
+@@ -212,8 +212,9 @@ class Arith_IntBinaryOpWithExactFlag<string mnemonic, list<Trait> traits = []> :
                 UnitAttr:$isExact)>,
-     Results<(outs SignlessIntegerOrIndexLike:$result)> {
+     Results<(outs Arith_SignlessIntegerOrIndexLike:$result)> {
  
 -  let assemblyFormat = [{ $lhs `,` $rhs (`exact` $isExact^)?
 -                          attr-dict `:` type($result) }];
@@ -14,7 +14,7 @@ index 77d780425c3c..c8736e4e9f71 100644
  }
  
  //===----------------------------------------------------------------------===//
-@@ -1357,10 +1358,7 @@ def Arith_TruncIOp : Arith_Op<"trunci",
+@@ -1549,10 +1549,7 @@ def Arith_TruncIOp : Arith_Op<"trunci",
        DefaultValuedAttr<Arith_IntegerOverflowAttr,
            "::mlir::arith::IntegerOverflowFlags::none">:$overflowFlags);
    let results = (outs SignlessFixedWidthIntegerLike:$out);
@@ -173,16 +173,19 @@ diff --git a/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td b/mlir/include/mlir/Dial
 index 7891cf19ac92..f1bd61e5b888 100644
 --- a/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td
 +++ b/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td
-@@ -1470,7 +1470,8 @@ def GPU_BarrierOp : GPU_Op<"barrier">,
-     Either none or all work items of a workgroup need to execute this op
-     in convergence.
+@@ -1509,10 +1509,5 @@ def GPU_BarrierOp : GPU_Op<"barrier">,
    }];
--  let assemblyFormat = "(`memfence` $address_spaces^)? attr-dict";
+-  let assemblyFormat = [{
+-    oilist(
+-        `named` `(` $named_barrier `:` type($named_barrier) `)`
+-      | `memfence` $address_spaces
+-      | `scope` $scope
+-    ) attr-dict
+-  }];
 +  // LLVM 20: attr-dict only.
 +  let hasCustomAssemblyFormat = 1;
    let hasCanonicalizer = 1;
-   let builders = [OpBuilder<(
-                       ins CArg<"std::optional<::mlir::gpu::AddressSpace>",
+   let hasVerifier = 1;
 diff --git a/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td b/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td
 index e31e46124faf..c02cfd0d8946 100644
 --- a/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td

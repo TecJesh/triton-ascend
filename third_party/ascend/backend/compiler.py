@@ -219,8 +219,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
 
         enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
         enable_select_analysis = metadata["enable_select_analysis"]
-        compile_on_910_95 = metadata["compile_on_910_95"]
-        force_simt_template = metadata["force_simt_template"]
+        # NPUOptions defaults these flags to None; coerce to bool so the C++
+        # pass-option bindings never receive a NoneType.
+        compile_on_910_95 = bool(metadata["compile_on_910_95"])
+        force_simt_template = bool(metadata["force_simt_template"])
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         auto_blockify_size = metadata["auto_blockify_size"]
@@ -1093,6 +1095,9 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
+    # Injected by JITFunction.run() from knobs.compilation; the Ascend
+    # pipeline has no FpSanitizer pass, so the value is accepted and ignored.
+    fpsan_homomorphic_casts: bool = False
     enable_graph_optimize: bool = True
     graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64

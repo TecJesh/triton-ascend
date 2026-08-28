@@ -25,6 +25,9 @@ import triton.language as tl
 import pytest
 import test_common
 
+pytestmark = pytest.mark.skip(
+    reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
+
 
 @triton.jit
 def negative_padding_with_load_kernel(

@@ -1,4 +1,4 @@
-// RUN: triton-opt %s -split-input-file --convert-triton-amdgpu-to-llvm=arch=gfx942 --convert-builtin-func-to-llvm | FileCheck %s
+// RUN: triton-opt %s -split-input-file --convert-triton-amdgpu-to-llvm=gfx-arch=gfx942 --convert-builtin-func-to-llvm | FileCheck %s
 
 #blocked0 = #ttg.blocked<{sizePerThread = [8], threadsPerWarp = [32], warpsPerCTA = [1], order = [0]}>
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32} {
@@ -24,6 +24,25 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32} {
     %12 = tt.splat %arg2 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>, #blocked0>
     %13 = tt.addptr %12, %4 : tensor<256x!tt.ptr<f32>, #blocked0>, tensor<256xi32, #blocked0>
     tt.store %13, %11 : tensor<256x!tt.ptr<f32>, #blocked0>
+    tt.return
+  }
+}
+
+// -----
+
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32} {
+  // CHECK-LABEL: volatile_load_in_loop
+  tt.func @volatile_load_in_loop(%flag: !tt.ptr<i32>) {
+    %c0_i32 = arith.constant 0 : i32
+    scf.while : () -> () {
+      // CHECK: scf.while
+      // CHECK: llvm.load volatile
+      %0 = tt.load %flag {isVolatile = true} : !tt.ptr<i32>
+      %1 = arith.cmpi eq, %0, %c0_i32 : i32
+      scf.condition(%1)
+    } do {
+      scf.yield
+    }
     tt.return
   }
 }

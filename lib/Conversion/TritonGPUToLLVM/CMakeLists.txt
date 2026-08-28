@@ -5,9 +5,11 @@ add_triton_library(TritonGPUToLLVM
     AllocateSharedMemoryUtility.cpp
     AllocateWarpGroups.cpp
     AssertOpToLLVM.cpp
+    CanonicalizeLLVMIR.cpp
     ControlFlowOpToLLVM.cpp
     ConvertLayoutOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp
+    Fp4ToFpOpToLLVMBase.cpp
     FuncOpToLLVM.cpp
     GatherOpToLLVM.cpp
     GlobalScratchMemoryAllocation.cpp
@@ -33,6 +35,7 @@ add_triton_library(TritonGPUToLLVM
     MLIRGPUToNVVMTransforms
     MLIRGPUToROCDLTransforms
     MLIRGPUTransforms
+    NVGPUIR
     TritonAnalysis
     TritonIR
     TritonGPUIR

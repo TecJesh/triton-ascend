@@ -23,9 +23,11 @@
  */
 
 #include "ir.h"
-#include "pybind11/pybind11.h"
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/operators.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -49,7 +51,7 @@
 #include <Python.h>
 
 using namespace mlir;
-namespace py = pybind11;
+namespace py = nanobind;
 
 struct AscendNPUIROpBuilder : public TritonOpBuilder {
   std::string target;
@@ -185,7 +187,7 @@ void installTritonContextManager() {
   }
   installed = true;
 
-  py::module_ tritonIr = py::module_::import("triton._C.libtriton.ir");
+  py::module_ tritonIr = py::module_::import_("triton._C.libtriton.ir");
   py::object ctxClass = tritonIr.attr("context");
   if (py::hasattr(ctxClass, "__enter__")) {
     return;
@@ -211,9 +213,8 @@ if not hasattr(_triton_ir.context, '__enter__'):
 
 } // namespace
 
-void init_ascend_ir(py::module &&m) {
-  auto affineExprClass =
-      py::class_<AffineExpr>(m, "affine_expr", py::module_local());
+void init_ascend_ir(py::module_ &m) {
+  auto affineExprClass = py::class_<AffineExpr>(m, "affine_expr");
   affineExprClass
       .def("__str__",
            [](AffineExpr self) {
@@ -283,35 +284,30 @@ void init_ascend_ir(py::module &&m) {
       "Create via static methods: get_constant(value), get_dim(pos), "
       "get_symbol(pos).";
 
-  py::class_<AffineConstantExpr, AffineExpr>(m, "affine_constant_expr",
-                                             py::module_local())
+  py::class_<AffineConstantExpr, AffineExpr>(m, "affine_constant_expr")
       .def("get_value", &AffineConstantExpr::getValue)
       .attr("__doc__") =
       "An affine expression that is a constant integer value. "
       "This is the simplest form of an affine expression, "
       "representing just a numeric constant.";
-  py::class_<AffineDimExpr, AffineExpr>(m, "affine_dim_expr",
-                                        py::module_local())
+  py::class_<AffineDimExpr, AffineExpr>(m, "affine_dim_expr")
       .def("get_position", &AffineDimExpr::getPosition)
       .attr("__doc__") =
       "An affine expression representing a single dimension variable. "
       "Dimensions typically correspond to loop induction variables.";
-  py::class_<AffineSymbolExpr, AffineExpr>(m, "affine_symbol_expr",
-                                           py::module_local())
+  py::class_<AffineSymbolExpr, AffineExpr>(m, "affine_symbol_expr")
       .def("get_position", &AffineSymbolExpr::getPosition)
       .attr("__doc__") =
       "An affine expression representing a single symbol variable. "
       "Symbols represent unknown but constant values (e.g., tile sizes).";
-  py::class_<AffineBinaryOpExpr, AffineExpr>(m, "affine_binary_op_expr",
-                                             py::module_local())
+  py::class_<AffineBinaryOpExpr, AffineExpr>(m, "affine_binary_op_expr")
       .def("get_lhs", &AffineBinaryOpExpr::getLHS)
       .def("get_rhs", &AffineBinaryOpExpr::getRHS)
       .attr("__doc__") =
       "An affine expression composed of two sub-expressions combined by "
       "an operator (add, sub, mul, mod, floordiv, ceildiv).";
 
-  auto affineMapClass =
-      py::class_<AffineMap>(m, "affine_map", py::module_local());
+  auto affineMapClass = py::class_<AffineMap>(m, "affine_map");
   affineMapClass
       .def("__str__",
            [](AffineMap &self) {
@@ -399,7 +395,7 @@ void init_ascend_ir(py::module &&m) {
             std::string exprStr;
             llvm::raw_string_ostream os(exprStr);
             result.print(os);
-            results.append(py::str(exprStr));
+            results.append(py::str(exprStr.c_str()));
           }
         }
 
@@ -501,7 +497,7 @@ void init_ascend_ir(py::module &&m) {
       "fundamental abstraction for describing data movement and "
       "computation placement in the Ascend NPU compiler.";
 
-  py::enum_<hivm::AddressSpace>(m, "AddressSpace", py::module_local())
+  py::enum_<hivm::AddressSpace>(m, "AddressSpace")
       .value("L1", hivm::AddressSpace::L1)
       .value("UB", hivm::AddressSpace::UB)
       .value("L0A", hivm::AddressSpace::L0A)
@@ -509,14 +505,14 @@ void init_ascend_ir(py::module &&m) {
       .value("L0C", hivm::AddressSpace::L0C)
       .export_values();
 
-  py::enum_<hivm::TCoreType>(m, "CoreType", py::module_local())
+  py::enum_<hivm::TCoreType>(m, "CoreType")
       .value("CUBE", hivm::TCoreType::CUBE)
       .value("VECTOR", hivm::TCoreType::VECTOR)
       .value("CUBE_OR_VECTOR", hivm::TCoreType::CUBE_OR_VECTOR)
       .value("CUBE_AND_VECTOR", hivm::TCoreType::CUBE_AND_VECTOR)
       .export_values();
 
-  py::enum_<hivm::PIPE>(m, "PIPE", py::module_local())
+  py::enum_<hivm::PIPE>(m, "PIPE")
       .value("PIPE_S", hivm::PIPE::PIPE_S)
       .value("PIPE_V", hivm::PIPE::PIPE_V)
       .value("PIPE_M", hivm::PIPE::PIPE_M)
@@ -527,13 +523,13 @@ void init_ascend_ir(py::module &&m) {
       .value("PIPE_FIX", hivm::PIPE::PIPE_FIX)
       .export_values();
 
-  py::enum_<hivm::SyncEventSlotMacroSync>(m, "SYNC_HINT", py::module_local())
+  py::enum_<hivm::SyncEventSlotMacroSync>(m, "SYNC_HINT")
       .value("wait", hivm::SyncEventSlotMacroSync::wait)
       .value("set", hivm::SyncEventSlotMacroSync::set)
       .value("internal", hivm::SyncEventSlotMacroSync::internal)
       .export_values();
 
-  py::enum_<hivm::EVENT>(m, "EVENT", py::module_local())
+  py::enum_<hivm::EVENT>(m, "EVENT")
       .value("EVENT_ID0", hivm::EVENT::EVENT_ID0)
       .value("EVENT_ID1", hivm::EVENT::EVENT_ID1)
       .value("EVENT_ID2", hivm::EVENT::EVENT_ID2)
@@ -544,13 +540,13 @@ void init_ascend_ir(py::module &&m) {
       .value("EVENT_ID7", hivm::EVENT::EVENT_ID7)
       .export_values();
 
-  py::enum_<hivm::VFMode>(m, "MODE", py::module_local())
+  py::enum_<hivm::VFMode>(m, "MODE")
       .value("SIMD", hivm::VFMode::SIMD)
       .value("SIMT", hivm::VFMode::SIMT)
       .value("MIX", hivm::VFMode::MIX)
       .export_values();
 
-  py::enum_<hivm::IteratorType>(m, "IteratorType", py::module_local())
+  py::enum_<hivm::IteratorType>(m, "IteratorType")
       .value("Parallel", hivm::IteratorType::kParallel)
       .value("Broadcast", hivm::IteratorType::kBroadcast)
       .value("Transpose", hivm::IteratorType::kTranspose)
@@ -565,35 +561,32 @@ void init_ascend_ir(py::module &&m) {
       .value("Opaque", hivm::IteratorType::kOpaque)
       .export_values();
 
-  py::enum_<hivm::FixpipeDMAMode>(m, "FixpipeDMAMode", py::module_local())
+  py::enum_<hivm::FixpipeDMAMode>(m, "FixpipeDMAMode")
       .value("NZ2DN", hivm::FixpipeDMAMode::NZ2DN)
       .value("NZ2ND", hivm::FixpipeDMAMode::NZ2ND)
       .value("NZ2NZ", hivm::FixpipeDMAMode::NZ2NZ)
       .export_values();
 
-  py::enum_<hivm::FixpipeDualDstMode>(m, "FixpipeDualDstMode",
-                                      py::module_local())
+  py::enum_<hivm::FixpipeDualDstMode>(m, "FixpipeDualDstMode")
       .value("NO_DUAL", hivm::FixpipeDualDstMode::NO_DUAL)
       .value("COLUMN_SPLIT", hivm::FixpipeDualDstMode::COLUMN_SPLIT)
       .value("ROW_SPLIT", hivm::FixpipeDualDstMode::ROW_SPLIT)
       .export_values();
 
-  py::enum_<hivm::FixpipePreQuantMode>(m, "FixpipePreQuantMode",
-                                       py::module_local())
+  py::enum_<hivm::FixpipePreQuantMode>(m, "FixpipePreQuantMode")
       .value("NO_QUANT", hivm::FixpipePreQuantMode::NO_QUANT)
       .value("F322BF16", hivm::FixpipePreQuantMode::F322BF16)
       .value("F322F16", hivm::FixpipePreQuantMode::F322F16)
       .value("S322I8", hivm::FixpipePreQuantMode::S322I8)
       .export_values();
 
-  py::enum_<hivm::FixpipePreReluMode>(m, "FixpipePreReluMode",
-                                      py::module_local())
+  py::enum_<hivm::FixpipePreReluMode>(m, "FixpipePreReluMode")
       .value("LEAKY_RELU", hivm::FixpipePreReluMode::LEAKY_RELU)
       .value("NO_RELU", hivm::FixpipePreReluMode::NO_RELU)
       .value("NORMAL_RELU", hivm::FixpipePreReluMode::NORMAL_RELU)
       .value("P_RELU", hivm::FixpipePreReluMode::P_RELU)
       .export_values();
-  py::enum_<hivm::DataLayout>(m, "DataLayout", py::module_local())
+  py::enum_<hivm::DataLayout>(m, "DataLayout")
       .value("nZ", hivm::DataLayout::nZ)
       .value("zN", hivm::DataLayout::zN)
       .export_values();
@@ -615,11 +608,11 @@ void init_ascend_ir(py::module &&m) {
   });
   m.def("remove_attr",
         [](OpState &op, std::string &name) -> void { op->removeAttr(name); });
-  py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
-  py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
+  py::class_<StringAttr, Attribute>(m, "str_attr");
+  py::class_<ArrayAttr, Attribute>(m, "array_attr");
 
-  py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(
-      m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())
+  py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(m, "ascendnpu_ir_builder",
+                                                    py::dynamic_attr())
       .def(py::init<MLIRContext *, std::string, std::string>(),
            py::arg("context"), py::arg("target") = "",
            py::arg("compile_mode") = "simd",
@@ -834,30 +827,34 @@ void init_ascend_ir(py::module &&m) {
                                                      bound_val, endOffset,
                                                      startOffset, dstStride);
            })
-      .def("create_gather_out_to_ub",
-           [](AscendNPUIROpBuilder &self, Value &src, Value &index,
-              const int64_t indexBoundary, const int32_t dim,
-              std::vector<Value> &srcStride, std::vector<Value> &endOffset,
-              std::vector<Value> &startOffset,
-              std::optional<Value> &other) -> Value {
-             auto elemTy =
-                 cast<triton::PointerType>(src.getType()).getPointeeType();
-             auto idxTy = cast<RankedTensorType>(index.getType());
-             auto idxShape = idxTy.getShape();
-             std::vector<int64_t> retShape(idxShape.begin(), idxShape.end());
-             auto resType = RankedTensorType::get(retShape, elemTy);
+      .def(
+          "create_gather_out_to_ub",
+          [](AscendNPUIROpBuilder &self, Value &src, Value &index,
+             const int64_t indexBoundary, const int32_t dim,
+             std::vector<Value> &srcStride, std::vector<Value> &endOffset,
+             std::vector<Value> &startOffset,
+             std::optional<Value> &other) -> Value {
+            auto elemTy =
+                cast<triton::PointerType>(src.getType()).getPointeeType();
+            auto idxTy = cast<RankedTensorType>(index.getType());
+            auto idxShape = idxTy.getShape();
+            std::vector<int64_t> retShape(idxShape.begin(), idxShape.end());
+            auto resType = RankedTensorType::get(retShape, elemTy);
 
-             // indexBoundary need to be i64 type
-             auto BoundI64Ty = self.getBuilder().getI64Type();
-             auto bound_val =
-                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
-             // dim need to be i32 type
-             auto dimI32Ty = self.getBuilder().getI32Type();
-             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
-             return self.create<triton::ascend::GatherOutToUbOp>(
-                 resType, src, index, bound_val, dim_val, srcStride, endOffset,
-                 startOffset, other.value_or(Value()));
-           })
+            // indexBoundary need to be i64 type
+            auto BoundI64Ty = self.getBuilder().getI64Type();
+            auto bound_val =
+                self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+            // dim need to be i32 type
+            auto dimI32Ty = self.getBuilder().getI32Type();
+            auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+            return self.create<triton::ascend::GatherOutToUbOp>(
+                resType, src, index, bound_val, dim_val, srcStride, endOffset,
+                startOffset, other.value_or(Value()));
+          },
+          py::arg("src"), py::arg("index"), py::arg("indexBoundary"),
+          py::arg("dim"), py::arg("srcStride"), py::arg("endOffset"),
+          py::arg("startOffset"), py::arg("other").none())
       .def("create_scatter_ub_to_out",
            [](AscendNPUIROpBuilder &self, Value &ptr, Value &value,
               Value &index, const int64_t indexBoundary, const int32_t dim,
@@ -885,7 +882,7 @@ void init_ascend_ir(py::module &&m) {
              int64_t dilation, int64_t groups, Type output_type) -> Value {
             Value biasValue;
             if (!bias.is_none()) {
-              biasValue = bias.cast<Value>();
+              biasValue = py::cast<Value>(bias);
             } else {
               biasValue = Value();
             }
@@ -1064,8 +1061,8 @@ void init_ascend_ir(py::module &&m) {
              return MemRefType::get(shape, elementType, layout, memorySpace);
            })
       .def("create_fixpipe",
-           [](AscendNPUIROpBuilder &self, Value src, py::object dst_obj,
-              hivm::FixpipeDMAMode dma_mode,
+           [](AscendNPUIROpBuilder &self, Value src,
+              std::optional<Value> dst_obj, hivm::FixpipeDMAMode dma_mode,
               hivm::FixpipeDualDstMode dual_dst_mode,
               hivm::FixpipePreQuantMode pre_quant_mode,
               hivm::FixpipePreReluMode pre_relu_mode) -> py::object {
@@ -1077,7 +1074,7 @@ void init_ascend_ir(py::module &&m) {
              auto loc = self.getLastLoc();
 
              Value dstValue;
-             bool needCreateDst = dst_obj.is_none();
+             bool needCreateDst = !dst_obj.has_value();
 
              if (needCreateDst) {
                auto srcType = dyn_cast<RankedTensorType>(src.getType());
@@ -1103,7 +1100,7 @@ void init_ascend_ir(py::module &&m) {
                    dstType.getShape(), dstType.getElementType());
                dstValue = emptyTensor.getResult();
              } else {
-               dstValue = py::cast<Value>(dst_obj);
+               dstValue = *dst_obj;
                if (!dyn_cast<ShapedType>(dstValue.getType())) {
                  llvm_unreachable("dst is not of ShapedType");
                }
@@ -1167,7 +1164,7 @@ void init_ascend_ir(py::module &&m) {
              TypeRange res_types{outputs};
              auto op = self.create<hivm::CustomOp>(res_types, name, inputs,
                                                    outputs, temp_buffers);
-             for (auto &attr : attrs) {
+             for (auto attr : attrs) {
                std::string attr_name = py::cast<std::string>(attr.first);
                Attribute attr_value = py::cast<Attribute>(attr.second);
                op->setAttr(attr_name, attr_value);
@@ -1214,7 +1211,7 @@ void init_ascend_ir(py::module &&m) {
              TypeRange res_types{outputs};
              auto op = self.create<hivm::CustomMacroOp>(
                  res_types, name, inputs, outputs, temp_buffers, syncArgs);
-             for (auto &attr : attrs) {
+             for (auto attr : attrs) {
                std::string attr_name = py::cast<std::string>(attr.first);
                Attribute attr_value = py::cast<Attribute>(attr.second);
                op->setAttr(attr_name, attr_value);

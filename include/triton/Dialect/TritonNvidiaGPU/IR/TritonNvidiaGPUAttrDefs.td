@@ -5,6 +5,7 @@ include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/EnumAttr.td"
 include "triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUDialect.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td"
+include "triton/Dialect/TritonGPU/IR/TritonGPUAttrInterfaces.td"
 include "mlir/IR/EnumAttr.td"
 
 def TTG_TensorMemorySpace : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemorySpace"> {
@@ -46,7 +47,52 @@ def TTNG_TMEMLoadReduceModifierEnum : EnumAttr<TritonNvidiaGPU_Dialect, TTNG_TME
   let assemblyFormat = "`<` $value `>`";
 }
 
-def TTG_TensorMemoryEncodingAttr : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemoryEncoding"> {
+def TTNG_PackedArithOpKindAttr : I32EnumAttr<
+    "PackedArithOpKind", "packed arithmetic operation",
+    [
+        I32EnumAttrCase<"ADD", 0, "add">,
+        I32EnumAttrCase<"SUB", 1, "sub">,
+        I32EnumAttrCase<"MUL", 2, "mul">,
+        I32EnumAttrCase<"FMA", 3, "fma">,
+        I32EnumAttrCase<"MIN", 4, "min">,
+        I32EnumAttrCase<"MAX", 5, "max">,
+    ]> {
+  let cppNamespace = "::mlir::triton::nvidia_gpu";
+}
+
+def TTNG_TensorMemoryScalesBlockRepOrderAttr : I32EnumAttr<
+    "TensorMemoryScalesBlockRepOrder", "",
+    [
+        I32EnumAttrCase<"MN_THEN_K", 0, "mnThenK">,
+        I32EnumAttrCase<"K_THEN_MN", 1, "kThenMn">,
+    ]> {
+    let cppNamespace = "::mlir::triton::nvidia_gpu";
+    let genSpecializedAttr = 0;
+}
+def TTNG_TensorMemoryScalesBlockRepOrderEnum
+    : EnumAttr<TritonNvidiaGPU_Dialect,
+               TTNG_TensorMemoryScalesBlockRepOrderAttr, "blockRepOrder"> {
+  let assemblyFormat = "`<` $value `>`";
+}
+
+def TTNG_CGALayoutRankTwoParam
+    : AttrOrTypeParameter<"::mlir::triton::gpu::CGAEncodingAttr",
+                          "rank-2 CGA layout"> {
+  let parser = [{
+    [&]() -> ::mlir::FailureOr<::mlir::triton::gpu::CGAEncodingAttr> {
+      return ::mlir::triton::nvidia_gpu::parseCGALayoutRankTwo($_parser);
+    }()
+  }];
+  let printer = [{
+    ::mlir::triton::nvidia_gpu::printCGALayoutRankTwo($_printer, $_self);
+  }];
+  let defaultValue =
+      "::mlir::triton::gpu::CGAEncodingAttr::get1CTALayout($_ctxt, 2)";
+}
+
+def TTG_TensorMemoryEncodingAttr
+    : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemoryEncoding",
+              [LayoutEncodingTrait]> {
   let mnemonic = "tensor_memory_encoding";
   let attrName = "triton.gpu.tensor_memory_encoding";
   let description = [{
@@ -63,29 +109,58 @@ def TTG_TensorMemoryEncodingAttr : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemor
     "unsigned":$blockM,
     "unsigned":$blockN,
     "unsigned":$colStride,
-    DefaultValuedParameter<"unsigned", "1">:$CTASplitM,
-    DefaultValuedParameter<"unsigned", "1">:$CTASplitN,
-    DefaultValuedParameter<"bool", "false">:$twoCTAs
+    TTNG_CGALayoutRankTwoParam:$CGALayout,
+    DefaultValuedParameter<"bool", "false">:$twoCTAs,
+    DefaultValuedParameter<"bool", "false">:$fp4Padded
   );
+  let skipDefaultBuilders = 1;
+  let builders = [
+    AttrBuilder<(ins "unsigned":$blockM,
+                     "unsigned":$blockN,
+                     "unsigned":$colStride,
+                     "::mlir::triton::gpu::CGAEncodingAttr":$CGALayout,
+                     CArg<"bool", "false">:$twoCTAs,
+                     CArg<"bool", "false">:$fp4Padded), [{
+      return $_get($_ctxt, blockM, blockN, colStride, CGALayout, twoCTAs,
+                   fp4Padded);
+    }]>
+  ];
   let genVerifyDecl = 1;
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
-def TTG_TensorMemoryScalesEncodingAttr : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemoryScalesEncoding"> {
+def TTG_TensorMemoryScalesEncodingAttr
+    : AttrDef<TritonNvidiaGPU_Dialect, "TensorMemoryScalesEncoding",
+              [LayoutEncodingTrait]> {
   let mnemonic = "tensor_memory_scales_encoding";
   let attrName = "triton.gpu.tensor_memory_scales_encoding";
   let description = [{
     An encoding to represent the layout of tensor memory scales.
     As described in the PTX doc, blocked scales in TMEM must be in a special layout. They are organized
-    as a multiple copies of "chunk", each of which having the size 32x4x4B. Moreover, such chunks are duplicated
+    as a multiple copies of a block, each of which having the size 32x4x4B. Moreover, such blocks are duplicated
     over 4 warps to fill entire 128 rows of TMEM. This encoding indicates that a tensor in TMEM is in such a special
     layout.
+    The parameter blockRepOrder determines the ordering of repeated scale blocks along TMEM columns. Here `mn`
+    denotes the MMA instruction's non-K matrix dimension: `M` for A scales and `N` for B scales. `mnThenK`
+    advances along that dimension before advancing K, while `kThenMn` advances along K before advancing the
+    non-K dimension. When one MMA instruction consumes only one scale block along K, the value of this parameter
+    does not matter. Otherwise, it must match the hardware instruction layout. For example, Rubin NVFP4 A scales
+    with `BLOCK_M = 256` require `kThenMn`, while B scales keep the default `mnThenK`.
   }];
   let parameters = (
     ins
-    DefaultValuedParameter<"unsigned", "1">:$CTASplitM,
-    DefaultValuedParameter<"unsigned", "1">:$CTASplitN
+    TTNG_CGALayoutRankTwoParam:$CGALayout,
+    DefaultValuedParameter<
+        "::mlir::triton::nvidia_gpu::TensorMemoryScalesBlockRepOrder",
+        "::mlir::triton::nvidia_gpu::TensorMemoryScalesBlockRepOrder::MN_THEN_K">:$blockRepOrder
   );
+  let builders = [
+    AttrBuilder<(ins "::mlir::triton::gpu::CGAEncodingAttr":$CGALayout), [{
+      return get(context, CGALayout,
+                 ::mlir::triton::nvidia_gpu::TensorMemoryScalesBlockRepOrder::MN_THEN_K);
+    }]>
+  ];
+  let genVerifyDecl = 1;
   let assemblyFormat = "`<` struct(params) `>`";
 }
 

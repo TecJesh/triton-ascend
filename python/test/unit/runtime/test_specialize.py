@@ -8,6 +8,7 @@ from triton._utils import canonicalize_dtype
 from triton.backends.nvidia.compiler import CUDABackend
 from triton.backends.amd.compiler import HIPBackend
 from triton.language import constexpr
+from triton.language import target_info
 from triton.tools.tensor_descriptor import TensorDescriptor
 from triton.experimental.gluon.nvidia.hopper import TensorDescriptor as GluonTensorDescriptor
 from triton.experimental.gluon.language._layouts import NVMMASharedLayout
@@ -77,7 +78,11 @@ def reference_specialize_impl(backend, arg, is_const, specialize_value, align):
     elif isinstance(arg, GluonTensorDescriptor):
         assert hasattr(arg.base, "data_ptr")
         inner = canonicalize_dtype(arg.base.dtype)
-        return (f"tensordesc<{inner}{list(arg.block_shape)},{arg.layout!r}>", None)
+        is_im2col = arg.__class__.__name__ == "TensorDescriptorIm2Col"
+        type_name = "tensordesc_im2col" if is_im2col else "tensordesc"
+        # For im2col mode, include the original tensor rank in the signature
+        rank_suffix = f",input_rank={len(arg.shape)}" if is_im2col else ""
+        return (f"{type_name}<{inner}{list(arg.block_shape)}{rank_suffix},{arg.layout!r}>", None)
     else:
         raise TypeError("Unsupported type: %s" % type(arg))
 
@@ -148,6 +153,17 @@ def gluon_tensordescriptors_to_specialize():
             layout=NVMMASharedLayout(0, tensor.dtype.itemsize * 8, len(tensor.shape)),
         ) for tensor in tensors_to_specialize() if tensor.shape[-1] % 16 == 0 and tensor.dtype.itemsize <= 4
     ]
+
+
+def test_specialize_gluon_fp4_descriptor_without_active_target(monkeypatch):
+    monkeypatch.setattr(target_info, "current_target", lambda: None)
+    tensor = torch.empty((128, 128), dtype=torch.uint8)
+    layout = NVMMASharedLayout(128, 8, fp4_padded=True)
+
+    descriptor = GluonTensorDescriptor.from_tensor(tensor, [128, 64], layout)
+
+    assert native_specialize_impl(CUDABackend, descriptor, False, True,
+                                  True) == reference_specialize_impl(CUDABackend, descriptor, False, True, True)
 
 
 def mock_tensors_to_specialize():

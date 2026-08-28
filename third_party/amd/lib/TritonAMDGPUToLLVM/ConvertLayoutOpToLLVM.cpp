@@ -29,16 +29,22 @@ public:
 
     auto srcTy = cast<RankedTensorType>(op.getSrc().getType());
     auto dstTy = cast<RankedTensorType>(op.getType());
-    if (!cvtNeedsWarpShuffle(srcTy, dstTy))
-      return failure();
-
-    MLIRContext *ctx = op.getContext();
+    auto *ctx = op.getContext();
     StringAttr kReg = str_attr("register");
     StringAttr kLane = str_attr("lane");
+    auto srcLayout =
+        triton::gpu::toLinearLayout(srcTy).removeZeroBasesAlongDim(kReg);
+    auto dstLayout =
+        triton::gpu::toLinearLayout(dstTy).removeZeroBasesAlongDim(kReg);
+    auto conversion = minimalCvtLayout(srcLayout, dstLayout);
+    if (llvm::to_vector(conversion.getOutDimNames()) !=
+        SmallVector<StringAttr, 2>{kReg, kLane})
+      return failure();
 
     auto elemTy = getTypeConverter()->convertType(srcTy.getElementType());
     int bitwidth = elemTy.isIntOrFloat() ? elemTy.getIntOrFloatBitWidth() : 64;
-    auto factors = getWarpLayoutConvertDecomposition(srcTy, dstTy, bitwidth);
+    auto factors =
+        getWarpLayoutConvertDecomposition(srcLayout, dstLayout, bitwidth);
     auto &[pReg, pLane, mixedTranspositions, nPack] = factors;
 
     if (mixedTranspositions.size() != 1)
@@ -104,12 +110,7 @@ public:
       return ret;
     };
 
-    auto inVals = unpackLLElements(loc, adaptor.getSrc(), rewriter);
-
-    // Handle broadcasting in registers.
-    auto srcLL = triton::gpu::toLinearLayout(srcTy);
-    auto rmSrc = actionRemoveBroadcastedRegs(srcLL);
-    inVals = rmSrc.apply(inVals);
+    auto inVals = unpackUniqueTensorElements(loc, adaptor.getSrc(), rewriter);
     // The input values may require broadcasting so that the conversion can be
     // described as a permutation. This does not cost anything for simple cases.
     int regDim = inVals.size();
@@ -244,20 +245,11 @@ public:
       });
     }
 
-    // Handle broadcasting in registers.
-    // The `factors` produce output values which may contain broadcasting.
-    // This needs to be removed before using `broadcastAs` to get the correct
-    // broadcasting as expected by the original destination layout.
-    auto dstLL = triton::gpu::toLinearLayout(dstTy);
-    auto rmDst = actionRemoveBroadcastedRegs(dstLL);
-    auto strippedDst = rmDst.apply(dstLL);
-    outVals.resize(strippedDst.getInDimSize(kReg));
+    // Drop registers introduced only to pad the permutation.
+    outVals.resize(dstLayout.getInDimSize(kReg));
 
-    if (!rmDst.isIdentity())
-      outVals = broadcastAs(outVals, dstLL);
-
-    Value result = packLLElements(loc, getTypeConverter(), outVals, rewriter,
-                                  op.getType());
+    Value result = packUniqueTensorElements(loc, getTypeConverter(), outVals,
+                                            rewriter, dstTy);
     rewriter.replaceOp(op, result);
     return success();
   }
@@ -273,10 +265,8 @@ class ConvertLayoutOpInThreadSwap
 
 public:
   ConvertLayoutOpInThreadSwap(LLVMTypeConverter &typeConverter,
-                              const TargetInfoBase &targetInfo,
-                              PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(typeConverter, benefit), targetInfo(targetInfo) {
-  }
+                              const TargetInfoBase &, PatternBenefit benefit)
+      : ConvertOpToLLVMPattern(typeConverter, benefit) {}
 
   struct ByteLocation {
     int regIdx;
@@ -365,7 +355,7 @@ public:
   static std::vector<Value>
   repackInputToRegisters(Location loc, OpAdaptor adaptor,
                          ConversionPatternRewriter &rewriter) {
-    auto inVals = unpackLLElements(loc, adaptor.getSrc(), rewriter);
+    auto inVals = unpackUniqueTensorElements(loc, adaptor.getSrc(), rewriter);
     auto numRegs = inVals.size() / regBytes;
     auto b = TritonLLVMOpBuilder(loc, rewriter);
     std::vector<Value> srcRegs(numRegs);
@@ -383,8 +373,8 @@ public:
       const std::vector<Value> &srcRegs, std::vector<Value> &dstRegs,
       llvm::ArrayRef<std::array<ByteLocation, regBytes>> dstRegContents,
       TritonLLVMOpBuilder &b) {
-    auto numRegs = srcRegs.size();
-    for (int i = 0; i < numRegs; ++i) {
+    auto numDstRegs = dstRegs.size();
+    for (int i = 0; i < numDstRegs; ++i) {
       assert(!dstRegs[i]);
       bool needBytePermute = false;
       bool multipleDeps = false;
@@ -411,8 +401,8 @@ public:
       const std::vector<Value> &srcRegs, std::vector<Value> &dstRegs,
       llvm::ArrayRef<std::array<ByteLocation, regBytes>> dstRegContents,
       TritonLLVMOpBuilder &b) {
-    auto numRegs = srcRegs.size();
-    for (int i = 0; i < numRegs; ++i) {
+    auto numDstRegs = dstRegs.size();
+    for (int i = 0; i < numDstRegs; ++i) {
       if (dstRegs[i])
         continue;
       std::set<int> srcRegSet;
@@ -449,13 +439,12 @@ public:
   };
 
   static BytePairInfo assembleBytePairs(
-      const std::vector<Value> &dstRegs,
+      int numSrcBytes, const std::vector<Value> &dstRegs,
       llvm::ArrayRef<std::array<ByteLocation, regBytes>> dstRegContents) {
-    int numRegs = dstRegs.size();
-    int numBytes = numRegs * regBytes;
     BytePairInfo info;
-    info.srcByteToPairMap.resize(numBytes, -1);
-    for (int i = 0; i < numRegs; ++i) {
+    info.srcByteToPairMap.resize(numSrcBytes, -1);
+    int numDstRegs = dstRegs.size();
+    for (int i = 0; i < numDstRegs; ++i) {
       if (dstRegs[i])
         continue;
       for (int pair = 0; pair < 2; ++pair) {
@@ -471,9 +460,10 @@ public:
     return info;
   }
 
-  static ByteQuadInfo assembleByteQuads(int numBytes, BytePairInfo &pairInfo) {
+  static ByteQuadInfo assembleByteQuads(int numSrcBytes,
+                                        BytePairInfo &pairInfo) {
     ByteQuadInfo info;
-    info.srcByteToQuadMap.resize(numBytes, -1);
+    info.srcByteToQuadMap.resize(numSrcBytes, -1);
     for (int i = 0; i < pairInfo.pairCombinations.size(); ++i) {
       if (pairInfo.pairMerged[i])
         continue;
@@ -648,11 +638,11 @@ public:
       const std::vector<Value> &srcRegs, std::vector<Value> &dstRegs,
       llvm::ArrayRef<std::array<ByteLocation, regBytes>> dstRegContents,
       TritonLLVMOpBuilder &b) {
-    int numRegs = srcRegs.size();
-    int numBytes = numRegs * regBytes;
+    int numSrcRegs = srcRegs.size();
+    int numSrcBytes = numSrcRegs * regBytes;
 
-    auto pairInfo = assembleBytePairs(dstRegs, dstRegContents);
-    auto quadInfo = assembleByteQuads(numBytes, pairInfo);
+    auto pairInfo = assembleBytePairs(numSrcBytes, dstRegs, dstRegContents);
+    auto quadInfo = assembleByteQuads(numSrcBytes, pairInfo);
 
     auto materializedPairs = materializePairs(srcRegs, pairInfo, b);
     auto materializedQuads = materializeQuads(srcRegs, quadInfo, b);
@@ -677,27 +667,26 @@ public:
         outVals[regIdx * regBytes + elem] = unpacked[elem];
       }
     }
-    return packLLElements(loc, getTypeConverter(), outVals, rewriter,
-                          op.getType());
+    return packUniqueTensorElements(loc, getTypeConverter(), outVals, rewriter,
+                                    op.getType());
   }
 
   void transferWithVPerm(ConvertLayoutOp op, const LinearLayout &conversion,
                          OpAdaptor adaptor,
                          ConversionPatternRewriter &rewriter) const {
     auto loc = op.getLoc();
-    auto numValues = conversion.getTotalInDimSize();
     auto ctx = rewriter.getContext();
     auto fullLayout = getFullLayout(conversion, ctx);
-    constexpr int regBytes = 4;
-    // Non-trivial "in register" layout_conversion permutes at least 4 values.
-    assert(numValues % regBytes == 0);
-    int numRegs = numValues / regBytes;
     // Mapping for dst register bytes to source bytes
     auto dstRegContents = generateDstRegContents(fullLayout);
     std::vector<Value> srcRegs = repackInputToRegisters(loc, adaptor, rewriter);
     TritonLLVMOpBuilder b(loc, rewriter);
 
-    std::vector<Value> dstRegs(numRegs);
+    auto numDstValues = fullLayout.size();
+    auto numDstRegs = dstRegContents.size();
+    // Non-trivial "in register" layout_conversion permutes at least 4 values.
+    assert(numDstValues % regBytes == 0);
+    std::vector<Value> dstRegs(numDstRegs);
 
     // Process dst registers that depend only on one src register
     processOneWayDependencies(srcRegs, dstRegs, dstRegContents, b);
@@ -721,16 +710,16 @@ public:
   LogicalResult
   matchAndRewrite(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto &amdTargInfo =
-        static_cast<const mlir::triton::AMD::TargetInfo &>(targetInfo);
-
     auto srcTy = op.getSrc().getType();
     auto dstTy = op.getType();
 
-    LinearLayout conversion = minimalCvtLayout(srcTy, dstTy);
-
     auto ctx = op.getContext();
     StringAttr kRegister = mlir::StringAttr::get(ctx, "register");
+    auto srcLayout =
+        triton::gpu::toLinearLayout(srcTy).removeZeroBasesAlongDim(kRegister);
+    auto dstLayout =
+        triton::gpu::toLinearLayout(dstTy).removeZeroBasesAlongDim(kRegister);
+    LinearLayout conversion = minimalCvtLayout(srcLayout, dstLayout);
 
     assert(to_vector(conversion.getInDimNames()) ==
            to_vector(conversion.getOutDimNames()));
@@ -740,17 +729,35 @@ public:
       return failure();
 
     // TODO: v_perm could be useful for fp16 tensors.
-    if (srcTy.getElementType().getIntOrFloatBitWidth() != 8)
+    auto elemTy = srcTy.getElementType();
+    int bitwidth = elemTy.isIntOrFloat() ? elemTy.getIntOrFloatBitWidth() : 64;
+    if (bitwidth != 8)
       return failure();
-    // TODO: broadcasting is not supported at the moment.
-    if (!conversion.isInvertible())
+
+    // If destination or source is smaller than one register, skip.
+    // Algorithm do not support such cases,
+    // assuming default computations are simple already.
+    if (conversion.getTotalInDimSize() < regBytes)
       return failure();
+    if (conversion.getTotalOutDimSize() < regBytes)
+      return failure();
+
+    for (const auto &base : conversion.getBases().at(kRegister)) {
+      assert(base.size() == 1);
+      // Currently swizzled distributed layouts are forbidden.
+      // This is a safety check in case such layouts are permited.
+      // Main concern is processFourWayDependencies function.
+      // It assumes each src byte is paired with at most one src byte,
+      // which is not true for broadcasted + swizzled layouts.
+      // To fix this limitation function should replace maps with multimaps.
+      if (!llvm::isPowerOf2_32(base[0]) && base[0] != 0) {
+        return failure();
+      }
+    }
+
     transferWithVPerm(op, conversion, adaptor, rewriter);
     return success();
   }
-
-private:
-  const TargetInfoBase &targetInfo;
 };
 
 } // namespace

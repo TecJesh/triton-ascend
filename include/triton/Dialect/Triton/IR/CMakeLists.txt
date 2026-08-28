@@ -5,16 +5,20 @@ mlir_tablegen(Ops.h.inc -gen-op-decls)
 mlir_tablegen(Ops.cpp.inc -gen-op-defs)
 mlir_tablegen(OpsEnums.h.inc -gen-enum-decls)
 mlir_tablegen(OpsEnums.cpp.inc -gen-enum-defs)
-add_mlir_doc(TritonOps TritonOps dialects/ -gen-op-doc)
+add_mlir_doc(TritonOps TritonOps dialects/ -gen-op-doc -dialect=tt)
 
 set(LLVM_TARGET_DEFINITIONS TritonDialect.td)
 mlir_tablegen(Dialect.h.inc -gen-dialect-decls)
 mlir_tablegen(Dialect.cpp.inc -gen-dialect-defs)
-add_mlir_doc(TritonDialect TritonDialect dialects/ -gen-dialect-doc)
+add_mlir_doc(TritonDialect TritonDialect dialects/ -gen-dialect-doc -dialect=tt)
 
 set(LLVM_TARGET_DEFINITIONS TritonTypes.td)
 mlir_tablegen(Types.h.inc -gen-typedef-decls)
 mlir_tablegen(Types.cpp.inc -gen-typedef-defs)
+
+set(LLVM_TARGET_DEFINITIONS TritonTypeEnums.td)
+mlir_tablegen(TypesEnums.h.inc -gen-enum-decls)
+mlir_tablegen(TypesEnums.cpp.inc -gen-enum-defs)
 
 set(LLVM_TARGET_DEFINITIONS TritonInterfaces.td)
 mlir_tablegen(AttrInterfaces.h.inc -gen-attr-interface-decls)

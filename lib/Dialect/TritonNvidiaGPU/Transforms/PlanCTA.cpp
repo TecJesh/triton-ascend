@@ -26,6 +26,7 @@
 #include "mlir/Support/LLVM.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/Passes.h"
 #include "llvm/ADT/STLExtras.h"
@@ -119,14 +120,12 @@ private:
   bool processConstant(arith::ConstantOp constant, Attribute layout);
   bool processSplat(triton::SplatOp splat, Attribute layout);
   bool processMakeRange(triton::MakeRangeOp makeRange, Attribute layout);
-  bool processMakeTensorPtr(triton::MakeTensorPtrOp makeTensorPtr,
-                            Attribute layout);
 
   bool processBroadcast(triton::BroadcastOp broadcast, Attribute layout);
   bool processExpandDimsBackward(triton::ExpandDimsOp expandDims,
                                  ttg::DistributedEncodingTrait newResultLayout);
-  bool processExpandDimsForward(triton::ExpandDimsOp expandDims,
-                                ttg::DistributedEncodingTrait newSrcLayout);
+  bool processReshapeBackward(triton::ReshapeOp reshape,
+                              Attribute newResultLayout);
 
   bool processConvertLayoutBackward(ttg::ConvertLayoutOp convertLayout,
                                     CastOp cast);
@@ -317,13 +316,13 @@ bool CTAPlanner::processReduce(triton::FuncOp &funcOp) {
 
     llvm::SmallVector<unsigned> CTASplitNum = CTAsPerCGA;
 
-    // If numCTAs > 1 and the only dimension is the reduced dimension, after the
-    // above two for-loops, CTAsPerCGA = [0] and remainingCTAs = numCTAs. We set
-    // CTAsPerCGA[0] = numCTAs and keep CTASplitNum[0] = 1 to ensure that no
-    // cross-CTA reduction is required, although this will introduce duplicated
-    // calculation
-    if (remainingCTAs > 0)
+    // If numCTAs > 1 and the only dimension is the reduced dimension, the
+    // loops above leave all CTAs unassigned. Put the remaining CTAs on that
+    // dimension so that they all collaborate in the reduction.
+    if (remainingCTAs > 0) {
       CTAsPerCGA[order[rank - 1]] *= remainingCTAs;
+      CTASplitNum[order[rank - 1]] = CTAsPerCGA[order[rank - 1]];
+    }
 
     auto numWarps = ttg::lookupNumWarps(reduce);
     auto CGALayout = ttg::CGAEncodingAttr::fromSplitParams(
@@ -333,11 +332,15 @@ bool CTAPlanner::processReduce(triton::FuncOp &funcOp) {
     auto newSrcLayout =
         replaceCGALayout(cast<ttg::DistributedEncodingTrait>(srcLayout),
                          srcShape, numWarps, CGALayout);
-    auto newResultLayout =
-        ttg::SliceEncodingAttr::get(context, axis, newSrcLayout);
     unsigned numOperands = reduce.getNumOperands();
+    unsigned numResults = reduce.getNumResults();
     SmallVector<Attribute> newSrcLayoutVec(numOperands, newSrcLayout);
-    SmallVector<Attribute> newResultLayoutVec(numOperands, newResultLayout);
+    Attribute newResultLayout;
+    if (rank > 1) {
+      newResultLayout =
+          ttg::SliceEncodingAttr::get(context, axis, newSrcLayout);
+    }
+    SmallVector<Attribute> newResultLayoutVec(numResults, newResultLayout);
 
     insertCasts(reduce.getOperation(), newSrcLayoutVec, newResultLayoutVec);
   });
@@ -415,17 +418,12 @@ bool CTAPlanner::propagateBackward(CastOp cast) {
       processSplat(splat, layout);
     } else if (auto makeRange = llvm::dyn_cast<triton::MakeRangeOp>(op)) {
       processMakeRange(makeRange, layout);
-    } else if (auto makeTensorPtr =
-                   llvm::dyn_cast<triton::MakeTensorPtrOp>(op)) {
-      processMakeTensorPtr(makeTensorPtr, layout);
-    } else if (llvm::isa<triton::AdvanceOp>(op)) {
-      // ptr operand and result have the same layout, while other operands are
-      // scalar values
-      processElementwise(op, layout);
     } else if (auto broadcast = llvm::dyn_cast<triton::BroadcastOp>(op)) {
       processBroadcast(broadcast, layout);
     } else if (auto expandDims = llvm::dyn_cast<triton::ExpandDimsOp>(op)) {
       processExpandDimsBackward(expandDims, layout);
+    } else if (auto reshape = llvm::dyn_cast<triton::ReshapeOp>(op)) {
+      processReshapeBackward(reshape, layout);
     } else if (auto ifOp = llvm::dyn_cast<scf::IfOp>(op)) {
       processIfOpBackward(ifOp, cast);
     } else if (auto forOp = llvm::dyn_cast<scf::ForOp>(op)) {
@@ -459,10 +457,6 @@ bool CTAPlanner::propagateForward(CastOp cast) {
     } else if (isLoadStoreOp(op)) {
       processLoadStore(op, layout);
     } else if (isElementwiseOp(op)) {
-      processElementwise(op, layout);
-    } else if (llvm::isa<triton::AdvanceOp>(op)) {
-      // ptr operand and result have the same layout, while other operands are
-      // scalar values
       processElementwise(op, layout);
     } else if (auto convertLayout = llvm::dyn_cast<ttg::ConvertLayoutOp>(op)) {
       return processConvertLayoutForward(convertLayout, cast);
@@ -525,7 +519,7 @@ void CTAPlanner::insertCasts(Operation *op,
   for (unsigned i = 0; i < op->getNumOperands(); ++i) {
     Value operand = op->getOperand(i);
     auto operandTy = operand.getType();
-    if (triton::isTensorOrTensorPointerType(operandTy)) {
+    if (isa<RankedTensorType>(operandTy)) {
       operandTy = replaceLayout(operandTy, newOperandLayouts[i]);
       auto cast =
           markBackward(CastOp::create(builder, loc, operandTy, operand));
@@ -538,7 +532,7 @@ void CTAPlanner::insertCasts(Operation *op,
   for (unsigned i = 0; i < op->getNumResults(); ++i) {
     Value result = op->getResult(i);
     auto resultTy = result.getType();
-    if (triton::isTensorOrTensorPointerType(resultTy)) {
+    if (isa<RankedTensorType>(resultTy)) {
       resultTy = replaceLayout(resultTy, newResultLayouts[i]);
       auto cast =
           markForward(CastOp::create(builder, loc, result.getType(), result));
@@ -572,9 +566,7 @@ void CTAPlanner::eliminateAdjacentCasts(CastOp cast0, CastOp cast1) {
 
 bool CTAPlanner::isLoadStoreOp(Operation *op) const {
   return llvm::isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
-                   triton::AtomicCASOp, triton::DescriptorLoadOp,
-                   triton::DescriptorStoreLikeOpInterface,
-                   triton::DescriptorGatherOp>(op);
+                   triton::AtomicCASOp, triton::DescriptorOpInterface>(op);
 }
 
 bool CTAPlanner::processLoadStore(Operation *op, Attribute layout) {
@@ -698,14 +690,6 @@ bool CTAPlanner::processMakeRange(triton::MakeRangeOp makeRange,
   return true;
 }
 
-bool CTAPlanner::processMakeTensorPtr(triton::MakeTensorPtrOp makeTensorPtr,
-                                      Attribute layout) {
-  // All inputs of `makeTensorPtr` are scalar types
-  llvm::SmallVector<Attribute> dummyInAttrs(makeTensorPtr.getNumOperands(), {});
-  insertCasts(makeTensorPtr.getOperation(), dummyInAttrs, {layout});
-  return true;
-}
-
 bool CTAPlanner::processBroadcast(triton::BroadcastOp broadcast,
                                   Attribute layout) {
   insertCasts(broadcast.getOperation(), {layout}, {layout});
@@ -721,10 +705,10 @@ bool CTAPlanner::processExpandDimsBackward(
   return true;
 }
 
-bool CTAPlanner::processExpandDimsForward(
-    triton::ExpandDimsOp expandDims,
-    ttg::DistributedEncodingTrait newSrcLayout) {
-  llvm::report_fatal_error("processExpandDimsForward not implemented yet");
+bool CTAPlanner::processReshapeBackward(triton::ReshapeOp reshape,
+                                        Attribute newResultLayout) {
+  auto newSrcLayout = inferSrcEncoding(reshape, newResultLayout);
+  insertCasts(reshape.getOperation(), {newSrcLayout}, {newResultLayout});
   return true;
 }
 
@@ -894,7 +878,7 @@ bool CTAPlanner::processOpFallback(Operation *op) {
   for (unsigned i = 0; i < op->getNumOperands(); ++i) {
     Value operand = op->getOperand(i);
     auto operandTy = operand.getType();
-    if (triton::isTensorOrTensorPointerType(operandTy)) {
+    if (isa<RankedTensorType>(operandTy)) {
       auto cast =
           markBackward(CastOp::create(builder, loc, operandTy, operand));
       op->setOperand(i, cast.getResult(0));
@@ -906,7 +890,7 @@ bool CTAPlanner::processOpFallback(Operation *op) {
   for (unsigned i = 0; i < op->getNumResults(); ++i) {
     Value result = op->getResult(i);
     auto resultTy = result.getType();
-    if (triton::isTensorOrTensorPointerType(resultTy)) {
+    if (isa<RankedTensorType>(resultTy)) {
       auto cast = markForward(CastOp::create(builder, loc, resultTy, result));
       result.replaceAllUsesExcept(cast.getResult(0), cast.getOperation());
       queue.push(cast);

@@ -13,6 +13,7 @@ from triton.backends import backends
 
 from .hook import Hook
 from ..flags import flags
+from ..state import metadata_state
 from .. import mode
 
 # TODO(fywkevin): add support for major.minor
@@ -37,7 +38,8 @@ class CudaAllocator:
 
         # Create the buffer
         import torch
-        buffer = torch.empty((aligned_size, ), dtype=torch.uint8, device="cuda")
+        with metadata_state():
+            buffer = torch.zeros((aligned_size, ), dtype=torch.uint8, device="cuda")
         self.instrumentation_hook.buffer = buffer
         return buffer
 
@@ -174,7 +176,6 @@ class InstrumentationHook(Hook):
                 triton_proton.add_sched_barriers(pm)
 
         def to_llvm_passes(pm):
-            triton_proton.add_allocate_proton_global_scratch_buffer(pm)
             if backend_name == "nvidia":
                 triton_proton.add_convert_proton_nvidia_gpu_to_llvm(pm)
             elif backend_name == "amd":
@@ -247,6 +248,12 @@ class InstrumentationHook(Hook):
         else:
             raise RuntimeError(f"IR path not found in metadata for function {function}")
 
+    def destroy_handle(self, module: Any, function: Any, name: str, metadata_group: Dict[str, str], hash: str) -> None:
+        if not function:
+            return
+        self.metadata_path.pop(function, None)
+        libproton.destroy_function_metadata(function)
+
     def _data_ptr(self) -> int:
         return 0 if self.buffer is None else self.buffer.data_ptr()
 
@@ -292,7 +299,7 @@ class InstrumentationHook(Hook):
             total_unit = data["num_warps"]
             uid_num = total_unit if self.mode.sampling_strategy == triton_proton.SAMPLING_STRATEGY.NONE else len(
                 sampled_warps)
-            block_num = int(alloc_size / scratch_mem_size)
+            block_num = alloc_size // scratch_mem_size if scratch_mem_size else 0
 
             # Binary trace layout:
             # +------------------+
@@ -344,5 +351,6 @@ class InstrumentationHook(Hook):
             InstrumentationHook.host_buffer = torch.empty(header_size + alloc_size, dtype=torch.uint8, device="cpu")
             config_portion = InstrumentationHook.host_buffer[:header_size]
             config_portion.copy_(torch.tensor(list(header_bytes), dtype=torch.uint8))
-            data_portion = InstrumentationHook.host_buffer[header_size:].view_as(self.buffer)
-            data_portion.copy_(self.buffer.cpu())
+            if self.buffer is not None:
+                data_portion = InstrumentationHook.host_buffer[header_size:].view_as(self.buffer)
+                data_portion.copy_(self.buffer.cpu())

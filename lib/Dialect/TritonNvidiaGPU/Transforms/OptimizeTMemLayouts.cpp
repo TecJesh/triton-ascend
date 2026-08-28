@@ -31,9 +31,9 @@ namespace {
 //  %lhs, %rhs = tt.split %t
 //
 // becomes
-//  %o0   = ttng.tmem_subslice %o { N = 0   }
+//  %o0   = ttng.tmem_subslice %o { offset = 0 }
 //  %lhs  = ttng.tmem_load     %o0
-//  %o1   = ttng.tmem_subslice %o { N = 128 }
+//  %o1   = ttng.tmem_subslice %o { offset = 128 }
 //  %rhs  = ttng.tmem_load     %o1
 //
 // and if %lhs / %rhs are split again through the same reshape->trans->split
@@ -114,15 +114,13 @@ public:
         [&](int64_t nOffset) -> std::pair<TMEMLoadOp, ttg::ConvertLayoutOp> {
       // Generate the subslice op.
       Value subSlice = TMEMSubSliceOp::create(rewriter, tmemLoad.getLoc(), tmem,
-                                              nOffset, splitNSize);
+                                              nOffset, splitNSize, 1);
 
       // Choose a layout compatible with the slice size.
       gpu::MemDescType subSliceType =
           cast<gpu::MemDescType>(subSlice.getType());
-      auto cgaLayout =
-          ttg::getCGALayout(splitOp.getOutLHS().getType().getEncoding());
-      auto distLayout = nvidia_gpu::getDefaultLayoutForTmemLdSt(
-          subSliceType, numWarps, cgaLayout);
+      auto distLayout =
+          nvidia_gpu::getDefaultLayoutForTmemLdSt(subSliceType, numWarps);
 
       RankedTensorType newLoadType =
           splitOp.getOutLHS().getType().cloneWithEncoding(distLayout);
@@ -184,22 +182,18 @@ public:
     int numWarps = ttg::lookupNumWarps(storeOp);
     Value truePred = arith::ConstantOp::create(b, loc, b.getBoolAttr(true));
 
-    auto cgaLayout = ttg::getCGALayout(joinOp.getLhs().getType().getEncoding());
-    auto *ctx = joinOp.getContext();
-
     auto createSlice = [&](TypedValue<RankedTensorType> input, int offset) {
-      auto subSlice = TMEMSubSliceOp::create(b, loc, tmem, offset, splitNSize);
-      auto distLayout = nvidia_gpu::getDefaultLayoutForTmemLdSt(
-          subSlice.getType(), numWarps, cgaLayout);
+      auto subSlice =
+          TMEMSubSliceOp::create(b, loc, tmem, offset, splitNSize, 1);
+      auto distLayout =
+          nvidia_gpu::getDefaultLayoutForTmemLdSt(subSlice.getType(), numWarps);
       auto newType = input.getType().cloneWithEncoding(distLayout);
       auto cvt = ttg::ConvertLayoutOp::create(b, loc, newType, input);
-      auto store =
-          TMEMStoreOp::create(b, loc, subSlice, cvt.getResult(), truePred);
-      return store;
+      TMEMStoreOp::create(b, loc, subSlice, cvt.getResult(), truePred);
     };
 
-    auto store0 = createSlice(joinOp.getLhs(), 0);
-    auto store1 = createSlice(joinOp.getRhs(), splitNSize);
+    createSlice(joinOp.getLhs(), 0);
+    createSlice(joinOp.getRhs(), splitNSize);
     b.eraseOp(storeOp);
     return success();
   }
@@ -272,16 +266,11 @@ public:
         tmemStoreOp.getDst().getType().getEncoding());
     if (!tmemEnc)
       return failure();
-    int M = tmemEnc.getBlockM();
-    int N = tmemEnc.getBlockN();
     int numWarps = ttg::lookupNumWarps(tmemStoreOp);
     // Compute the alternative layout.
-    auto cgaLayout =
-        ttg::getCGALayout(tmemStoreOp.getSrc().getType().getEncoding());
     std::optional<LinearLayout> ll =
         nvidia_gpu::getDistributedLayoutForTmemLdSt(
-            tmemStoreOp.getDst().getType(), TMemAccessAtom::I16x256b, numWarps,
-            cgaLayout);
+            tmemStoreOp.getDst().getType(), TMemAccessAtom::I16x256b, numWarps);
     if (!ll)
       return failure();
     Attribute newEncoding =
@@ -342,15 +331,12 @@ public:
         tmemLoadOp.getSrc().getType().getEncoding());
     if (!tmemEnc)
       return failure();
-    int M = tmemEnc.getBlockM();
-    int N = tmemEnc.getBlockN();
     int numWarps = ttg::lookupNumWarps(tmemLoadOp);
     auto oldType = tmemLoadOp.getType();
-    auto cgaLayout = ttg::getCGALayout(oldType.getEncoding());
     auto memType = cast<gpu::MemDescType>(tmemLoadOp.getSrc().getType());
     // Compute the alternative layout.
     auto ll = nvidia_gpu::getDistributedLayoutForTmemLdSt(
-        memType, TMemAccessAtom::I16x256b, numWarps, cgaLayout);
+        memType, TMemAccessAtom::I16x256b, numWarps);
     if (!ll)
       return failure();
     Attribute newEncoding =

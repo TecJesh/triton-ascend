@@ -30,11 +30,12 @@ using namespace mlir;
 using namespace mlir::triton;
 using namespace mlir::triton::NVIDIA;
 
-using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::MemDescType;
 using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingTrait;
+
+namespace {
 
 triton::nvgpu::WGMMAEltType getMmaRetType(Value d) {
   auto dTy = cast<RankedTensorType>(d.getType()).getElementType();
@@ -148,8 +149,8 @@ SmallVector<Value> unpackAccumulator(ConversionPatternRewriter &rewriter,
   return results;
 }
 
-static Value faddAccumulate(ConversionPatternRewriter &rewriter, Location loc,
-                            Value a, Value b) {
+Value faddAccumulate(ConversionPatternRewriter &rewriter, Location loc, Value a,
+                     Value b) {
   int numEl = cast<LLVM::LLVMStructType>(a.getType()).getBody().size();
   Value newStruct = LLVM::UndefOp::create(rewriter, loc, a.getType());
   for (int i = 0; i < numEl; ++i) {
@@ -161,9 +162,8 @@ static Value faddAccumulate(ConversionPatternRewriter &rewriter, Location loc,
   return newStruct;
 }
 
-static SmallVector<Value> emitWait(ConversionPatternRewriter &rewriter,
-                                   Location loc, SmallVector<Value> acc,
-                                   int pendings) {
+SmallVector<Value> emitWait(ConversionPatternRewriter &rewriter, Location loc,
+                            SmallVector<Value> acc, int pendings) {
   auto b = TritonLLVMOpBuilder(loc, rewriter);
   SmallVector<Type> types(acc.size(), acc[0].getType());
   auto structTy =
@@ -221,7 +221,6 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
   int numRepK = ceil<unsigned>(aTensorTy.getShape()[1], mmaSizeK);
   DotOpMmaSmemLoader aLoader;
   SmallVector<Value> structA;
-  auto warpGroups = {warpSize[0] / 4, warpSize[1]};
   bool transA = false;
   if (aInShared) {
     auto loader =
@@ -236,7 +235,7 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
     aLoader = std::move(*loader);
     transA = aLoader.getDescriptor().transposed;
   } else {
-    structA = unpackLLElements(loc, loadedA, rewriter);
+    structA = unpackTensorElements(loc, loadedA, rewriter, aTensorTy);
   }
   auto bLoader = DotOpMmaSmemLoader::build(loc, rewriter, bTensorTy, baseB,
                                            {K, N}, 1, 3, false, dTensorTy);
@@ -248,7 +247,7 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
   }
   bool transB = !bLoader->getDescriptor().transposed;
 
-  auto fc = unpackLLElements(loc, loadedC, rewriter);
+  auto fc = unpackTensorElements(loc, loadedC, rewriter, dTensorTy);
 
   triton::nvgpu::WGMMAEltType eltTypeC = getMmaRetType(d);
   triton::nvgpu::WGMMAEltType eltTypeA = getMmaOperandType(a, allowTF32);
@@ -259,7 +258,6 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
   triton::nvgpu::WGMMALayout layoutB = transB ? triton::nvgpu::WGMMALayout::row
                                               : triton::nvgpu::WGMMALayout::col;
 
-  auto func = op->getParentOfType<LLVM::LLVMFuncOp>();
   Operation *startSequence = NVVM::WgmmaFenceAlignedOp::create(rewriter, loc);
   SmallVector<Value> mmaResults;
   for (int m = 0; m < numRepM; ++m) {
@@ -296,6 +294,34 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
           llvm::SmallVector<Value> regA =
               loadReg(rewriter, loc, structA, (m * numRepK + k) * regASize,
                       regASize, startSequence);
+          // Emit "dummy" mov instructions for the register operand. The
+          // expectation is that there is a wait_group op before this WGMMA op
+          // which waits for the same WGMMA op issued in the previous iteration
+          // to finish. By inserting a mov instruction between such wait and the
+          // WGMMA, we can safely overlap transformations on the A operand with
+          // the previous-iteration WGMMA still in flight.
+          for (Value &regAVal : regA) {
+            OpBuilder::InsertionGuard guard(rewriter);
+            rewriter.setInsertionPoint(startSequence);
+            Type regTy = regAVal.getType();
+            if (!regTy.isIntOrFloat() || regTy.getIntOrFloatBitWidth() != 32) {
+              return mlir::emitError(loc, "unsupported WGMMA A register type ")
+                     << regTy;
+            }
+
+            Value movIn = regTy.isInteger(32)
+                              ? regAVal
+                              : tb.bitcast(regAVal, rewriter.getI32Type());
+
+            PTXBuilder ptxBuilder;
+            auto *dstOpr = ptxBuilder.newOperand("=r");
+            auto *srcOpr = ptxBuilder.newOperand(movIn, "r");
+            ptxBuilder.create("mov")->o("b32")(dstOpr, srcOpr);
+            Value movedReg =
+                ptxBuilder.launch(rewriter, loc, rewriter.getI32Type());
+            regAVal =
+                regTy.isInteger(32) ? movedReg : tb.bitcast(movedReg, regTy);
+          }
           auto regATy = LLVM::LLVMStructType::getLiteral(
               rewriter.getContext(),
               SmallVector<Type>(regA.size(), regA[0].getType()));
@@ -340,20 +366,18 @@ LogicalResult convertDot(const LLVMTypeConverter *typeConverter,
       unpackAccumulator(rewriter, loc, mmaResults, dTensorTy);
 
   // replace with new packed result
-  Type structTy = LLVM::LLVMStructType::getLiteral(
-      mmaEncoding.getContext(),
-      SmallVector<Type>(results.size(), dTensorTy.getElementType()));
-  auto res = packLLElements(loc, typeConverter, results, rewriter, structTy);
+  auto res =
+      packTensorElements(loc, typeConverter, results, rewriter, dTensorTy);
   rewriter.replaceOp(op, res);
   return success();
 }
+
+} // namespace
 
 LogicalResult convertWGMMA(triton::nvidia_gpu::WarpGroupDotOp op,
                            triton::nvidia_gpu::WarpGroupDotOp::Adaptor adaptor,
                            const LLVMTypeConverter *typeConverter,
                            ConversionPatternRewriter &rewriter, Value thread) {
-  auto AEnc = op.getA().getType().getEncoding();
-  auto BEnc = op.getB().getType().getEncoding();
   return convertDot(typeConverter, rewriter, op.getLoc(), op.getOperation(),  //
                     op.getA(), op.getB(), op.getC(), op.getD(), op.getUseC(), //
                     adaptor.getA(), adaptor.getB(), adaptor.getC(),           //

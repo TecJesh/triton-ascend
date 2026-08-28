@@ -26,6 +26,13 @@ void populateElementwiseOpToLLVMPatterns(
     ModuleAxisInfoAnalysis &axisInfoAnalysis, ModuleAllocation &allocation,
     const TargetInfo &targetInfo, PatternBenefit benefit);
 
+void populateFpCastOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
+                                    RewritePatternSet &patterns, bool ftz,
+                                    ModuleAxisInfoAnalysis &axisInfoAnalysis,
+                                    ModuleAllocation &allocation,
+                                    const TargetInfo &targetInfo,
+                                    PatternBenefit benefit);
+
 // Manipulates with execution mode register which is per-wavefront one.
 // The register controls execution of instructions - e.g., rounding modes,
 // exception handling, etc.
@@ -45,11 +52,6 @@ void populateTritonAMDGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         const AMD::TargetInfo &,
                                         PatternBenefit benefit);
 
-void populateUpcastMXFPToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                      RewritePatternSet &patterns,
-                                      const TargetInfo &targetInfo,
-                                      PatternBenefit benefit);
-
 void populateFp4ToFpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                    RewritePatternSet &patterns,
                                    const TargetInfo &targetInfo,
@@ -61,6 +63,11 @@ void populateMaskedOpsToLLVMPatterns(RewritePatternSet &patterns,
 void populateTensorPtrOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);
+
+void populateHistogramOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
+                                       RewritePatternSet &patterns,
+                                       const TargetInfoBase &targetInfo,
+                                       PatternBenefit benefit);
 
 void populateBarrierOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                      RewritePatternSet &patterns,

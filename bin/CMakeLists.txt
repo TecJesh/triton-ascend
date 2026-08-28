@@ -73,7 +73,7 @@ target_link_libraries(triton-llvm-opt PRIVATE
   LLVMSupport
   LLVMOption
   LLVMCodeGen
-  )
+)
 export_executable_symbols_for_plugins(triton-llvm-opt)
 
 
@@ -88,4 +88,4 @@ target_link_libraries(triton-tensor-layout PRIVATE
   MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms
-  )
+)
