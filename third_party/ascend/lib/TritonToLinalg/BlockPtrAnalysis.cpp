@@ -55,8 +55,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include <cassert>
-#include <optional>
 #include <limits>
+#include <optional>
 #include <set>
 
 #define DEBUG_TYPE "triton-block-ptr-analysis"
