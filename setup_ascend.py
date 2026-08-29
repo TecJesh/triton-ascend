@@ -183,7 +183,7 @@ def _get_default_version():
     version_file = _THIS_DIR / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
-    return "3.6.0-dev"
+    return "3.7.0-dev"
 
 
 def _get_version(is_manylinux, get_git_commit_hash):
@@ -341,7 +341,7 @@ def _get_install_requirements():
         "pybind11",
         "pandas",
         "pyelftools>=0.29",
-        "triton==3.6.0",
+        "triton==3.7.0",
     ]
     return [*install_requires]
 
