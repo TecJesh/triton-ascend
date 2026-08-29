@@ -523,7 +523,7 @@ index 3ffb904574..d0df0fbf82 100644
          self.builder.options = options
 +
 +        # Set up unified builder interface with methods from specialized builders
-+        compile_mode = "simt" if (hasattr(options, "force_simt_only") and options.force_simt_only) else "simd"
++        compile_mode = "simt" if getattr(options, "compile_mode", "simd") == "simt_only" else "simd"
 +        self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""),
 +                                                             compile_mode=compile_mode)
 +        self.ascend_builder.set_loc(file_name, begin_line, 0)
@@ -650,7 +650,7 @@ index d6f8dd26fe..eb61008092 100644
  from pathlib import Path
  import re
  import functools
-@@ -324,7 +325,29 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -324,7 +325,25 @@ def compile(src, target=None, options=None, _env_vars=None):
      if compilation_listener:
          timer.finished_ir_initialization()
      for ext, compile_ir in list(stages.items())[first_stage:]:
@@ -662,10 +662,6 @@ index d6f8dd26fe..eb61008092 100644
 +                stage_name = "ConvertTritonIRToLinalgIR"
 +            elif (ext == "npubin"):
 +                stage_name = "ConvertLinalgIRToBinary"
-+            elif (ext == "bcmlir"):
-+                stage_name = "BytecodeToLinalgIRByBishengirOpt"
-+            elif (ext == "mlirbc"):
-+                stage_name = "LinalgIRToBytecodeByTritonMLIROpt"
 +            else:
 +                stage_name = "MLIRCompile"
 +            if hasattr(e, 'stderr') and e.stderr:
@@ -681,19 +677,7 @@ index d6f8dd26fe..eb61008092 100644
          ir_filename = f"{file_name}.{ext}"
          if fn_override_manager is None:
              # Users can override kernels at scale by setting `ir_override` in autotune config
-@@ -423,8 +446,10 @@ class CompiledKernel:
-         # stores the text of each level of IR that was generated during compilation
-         asm_files = [Path(p) for c, p in metadata_group.items() if not c.endswith(".json")]
-         binary_ext = backend.binary_ext
-+        binary_extensions = getattr(backend, 'binary_extensions', {binary_ext})
-         self.asm = AsmDict({
--            file.suffix[1:]: file.read_bytes() if file.suffix[1:] == binary_ext else file.read_text()
-+            file.suffix[1:]:
-+            file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
-             for file in asm_files
-         })
-         self.metadata_group = metadata_group
-@@ -466,7 +491,7 @@ class CompiledKernel:
+@@ -466,7 +489,7 @@ class CompiledKernel:
              knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
