@@ -285,6 +285,70 @@ index 14063506d..f83416d88 100644
      NoRegionArguments,
      SingleBlockImplicitTerminator<"scope::ReturnOp">,
      SingleBlock,
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
+index f96bfdb8f..b4e19e8c0 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
+@@ -99,7 +99,12 @@ getTerminatorSuccessorRegions(Operation *terminator,
+     termIface.getSuccessorRegions(operandAttrs, successors);
+     return;
+   }
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 23: getSuccessorRegions takes Region& (not Region*).
++  branchOp.getSuccessorRegions(*terminator->getParentRegion(), successors);
++#else
+   branchOp.getSuccessorRegions(terminator->getParentRegion(), successors);
++#endif
+ }
+ 
+ static bool userCanReachMatmulOuts(Value current,
+@@ -131,7 +136,12 @@ static bool userCanReachMatmulOuts(Value current,
+       SmallVector<RegionSuccessor> successors;
+       getTerminatorSuccessorRegions(user, branchOp, successors);
+       for (const RegionSuccessor &successor : successors) {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++        // LLVM 23: successor inputs moved to RegionBranchOpInterface.
++        ValueRange inputs = branchOp.getSuccessorInputs(successor);
++#else
+         ValueRange inputs = successor.getSuccessorInputs();
++#endif
+         if (idx.value() >= inputs.size())
+           continue;
+         if (userCanReachMatmulOuts(inputs[idx.value()], visited))
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
+index 3d733988a..a76aeed4b 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
+@@ -423,8 +423,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+   SmallVector<RegionSuccessor, 2> entrySuccessors;
+   branch.getSuccessorRegions(RegionBranchPoint::parent(), entrySuccessors);
+   for (RegionSuccessor &entrySuccessor : entrySuccessors) {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++    ValueRange entryInputs = branch.getSuccessorInputs(entrySuccessor);
++#else
++    ValueRange entryInputs = entrySuccessor.getSuccessorInputs();
++#endif
+     appendRegionFlowEdges(branch.getEntrySuccessorOperands(entrySuccessor),
+-                          entrySuccessor.getSuccessorInputs(), edges);
++                          entryInputs, edges);
+   }
+ 
+   for (Region &region : branch->getRegions()) {
+@@ -436,8 +441,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+             block.getTerminator());
+         if (!terminator)
+           continue;
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++        ValueRange succInputs = branch.getSuccessorInputs(successorRegion);
++#else
++        ValueRange succInputs = successorRegion.getSuccessorInputs();
++#endif
+         appendRegionFlowEdges(terminator.getSuccessorOperands(successorRegion),
+-                              successorRegion.getSuccessorInputs(), edges);
++                              succInputs, edges);
+       }
+     }
+   }
 diff --git a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 index da5a9b5d3..5488fbb1c 100644
 --- a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp

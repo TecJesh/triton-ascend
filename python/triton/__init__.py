@@ -1,5 +1,9 @@
 """isort:skip_file"""
+<<<<<<< HEAD
 __version__ = '3.8.0'
+=======
+__version__ = '3.7.0'
+>>>>>>> maofang/3.7-master
 
 # ---------------------------------------
 # Note: import order is significant here.

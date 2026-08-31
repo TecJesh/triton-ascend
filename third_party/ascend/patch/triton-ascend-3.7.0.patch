@@ -249,10 +249,14 @@ index 2a37535d35..d5a4159dcb 100644
    TritonTestDialect
    TritonTestProton
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
+<<<<<<< HEAD
 index e36459e331..1fcf983d5f 100644
+=======
+index a7d60d5dff..4930e8e1fa 100644
+>>>>>>> maofang/3.7-master
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,35 @@
+@@ -1,6 +1,36 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -263,6 +267,7 @@ index e36459e331..1fcf983d5f 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
++#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/UBOverflowChecker.h"
 +#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
@@ -288,7 +293,11 @@ index e36459e331..1fcf983d5f 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
+<<<<<<< HEAD
 @@ -93,6 +122,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+=======
+@@ -90,6 +120,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+>>>>>>> maofang/3.7-master
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -308,7 +317,12 @@ index e36459e331..1fcf983d5f 100644
    mlir::triton::registerSetMinimumSharedMemoryPass();
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
+<<<<<<< HEAD
 @@ -150,6 +192,21 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+=======
+   mlir::NVVM::registerInlinerInterface(registry);
+@@ -146,6 +189,22 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+>>>>>>> maofang/3.7-master
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -319,6 +333,7 @@ index e36459e331..1fcf983d5f 100644
 +  mlir::triton::registerAddControlFlowConditionPasses();
 +  mlir::triton::registerAddMultiBufferOuterScopePasses();
 +  mlir::triton::registerAddMultiBufferInnerScopePasses();
++  mlir::triton::registerUBOverflowCheckerPasses();
 +  mlir::triton::registerRemoveSsbufAttrPasses();
 +  mlir::triton::registerAnalyzeDataFlowPasses();
 +  mlir::triton::registerComputeBlockOptPasses();
@@ -327,10 +342,17 @@ index e36459e331..1fcf983d5f 100644
 +  mlir::triton::registerRefineArgsBlockIdPasses();
 +  mlir::triton::registerSeparateMemoryFromComputePasses();
 +
+<<<<<<< HEAD
    // Register plugin passes and dialects.
    for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
      plugin.registerPasses();
 @@ -162,10 +219,17 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+=======
+   // Plugin passes
+   if (std::string filename =
+           mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+@@ -180,10 +239,17 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+>>>>>>> maofang/3.7-master
        mlir::triton::gpu::TritonGPUDialect,
        mlir::triton::instrument::TritonInstrumentDialect,
        mlir::math::MathDialect, mlir::arith::ArithDialect, mlir::scf::SCFDialect,
@@ -942,7 +964,7 @@ index adc4dcdd64..9032de8704 100644
          self.builder.options = options
 +
 +        # Set up unified builder interface with methods from specialized builders
-+        compile_mode = "simt" if (hasattr(options, "force_simt_only") and options.force_simt_only) else "simd"
++        compile_mode = "simt" if getattr(options, "compile_mode", "simd") == "simt_only" else "simd"
 +        self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""),
 +                                                             compile_mode=compile_mode)
 +        self.ascend_builder.set_loc(file_name, begin_line, 0)
@@ -1069,7 +1091,7 @@ index 5c7088fc34..36f4bb1376 100644
  from pathlib import Path
  import re
  import functools
-@@ -324,7 +325,29 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -324,7 +325,25 @@ def compile(src, target=None, options=None, _env_vars=None):
      if compilation_listener:
          timer.finished_ir_initialization()
      for ext, compile_ir in list(stages.items())[first_stage:]:
@@ -1081,10 +1103,6 @@ index 5c7088fc34..36f4bb1376 100644
 +                stage_name = "ConvertTritonIRToLinalgIR"
 +            elif (ext == "npubin"):
 +                stage_name = "ConvertLinalgIRToBinary"
-+            elif (ext == "bcmlir"):
-+                stage_name = "BytecodeToLinalgIRByBishengirOpt"
-+            elif (ext == "mlirbc"):
-+                stage_name = "LinalgIRToBytecodeByTritonMLIROpt"
 +            else:
 +                stage_name = "MLIRCompile"
 +            if hasattr(e, 'stderr') and e.stderr:
@@ -1100,6 +1118,7 @@ index 5c7088fc34..36f4bb1376 100644
          ir_filename = f"{file_name}.{ext}"
          if fn_override_manager is None:
              # Users can override kernels at scale by setting `ir_override` in autotune config
+<<<<<<< HEAD
 @@ -423,8 +446,10 @@ class CompiledKernel:
          # stores the text of each level of IR that was generated during compilation
          asm_files = [Path(p) for c, p in metadata_group.items() if not c.endswith(".json")]
@@ -1113,6 +1132,9 @@ index 5c7088fc34..36f4bb1376 100644
          })
          self.metadata_group = metadata_group
 @@ -481,7 +506,7 @@ class CompiledKernel:
+=======
+@@ -466,7 +489,7 @@ class CompiledKernel:
+>>>>>>> maofang/3.7-master
              knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
@@ -1543,13 +1565,22 @@ index 19d5a17cd4..e614f0ac86 100644
                  if triton.knobs.compilation.front_end_debugging:
                      raise
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
+<<<<<<< HEAD
 index 3a37f7a81a..cbddb92271 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
 @@ -400,22 +400,30 @@ def create_function_from_signature(sig, kparams, backend):
+=======
+index ba21a58e19..dacab27a95 100644
+--- a/python/triton/runtime/jit.py
++++ b/python/triton/runtime/jit.py
+@@ -399,33 +399,49 @@ def create_function_from_signature(sig, kparams, backend):
+>>>>>>> maofang/3.7-master
      assert len(sig.parameters) == len(kparams)
      # Create the function argument list and the dict entries for the return statement
      specialization = []
++    uses_alignment_specialization = False
++    alignment_specialization_name = "__triton_alignment_specialization"
 +    integer_annotation_types = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}
      # signature
      for name, kp in zip(sig.parameters.keys(), kparams):
@@ -1563,8 +1594,9 @@ index 3a37f7a81a..cbddb92271 100644
 +            is_const = kp.is_const
 +            specialize = not kp.do_not_specialize
 +            align = not kp.do_not_specialize_on_alignment
++            effective_align = alignment_specialization_name if align and specialize else "False"
 +            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
-+                   f"{align} and backend.use_alignment_specialization(options))")
++                   f"{effective_align})")
              if kp.annotation_type:
                  if isinstance(kp.annotation_type, str):
                      if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:
@@ -1572,6 +1604,7 @@ index 3a37f7a81a..cbddb92271 100644
                          specialize = False
                  if specialize:
 -                    specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
++                    uses_alignment_specialization = uses_alignment_specialization or align
 +                    if kp.annotation_type in integer_annotation_types:
 +                        # An integer annotation constrains the type of runtime values, but must not discard a
 +                        # constexpr classification already produced by the value specializer (for example, 1).
@@ -1582,6 +1615,7 @@ index 3a37f7a81a..cbddb92271 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
+<<<<<<< HEAD
 diff --git a/third_party/ascend/include/Dialect/TritonStructured/IR/TritonStructuredDialect.td b/third_party/ascend/include/Dialect/TritonStructured/IR/TritonStructuredDialect.td
 index 7d205da94f..b020deb181 100644
 --- a/third_party/ascend/include/Dialect/TritonStructured/IR/TritonStructuredDialect.td
@@ -1650,3 +1684,21 @@ index 7c2c3659a9..ac7550906e 100644
      Value threadPred = ttg::emitRedundantThreadPredicate(freeVarMasks, rewriter,
                                                           loc, targetInfo);
      const int numVecs = elemsPerThread / vec;
+=======
+             else:
++                uses_alignment_specialization = uses_alignment_specialization or (align and specialize)
+                 specialization.append(f"{ret}")
+ 
+     # compute argument string for a given parameter
+     arg = lambda x: x[0] if x[1].default is inspect.Parameter.empty else f"{x[0]}=default_{x[0]}"
++    alignment_specialization_init = (f"    {alignment_specialization_name} = "
++                                     "backend.use_alignment_specialization(options)\n"
++                                     if uses_alignment_specialization else "")
+     func_body = f"""
+ def dynamic_func({", ".join(list(map(arg, sig.parameters.items())) + ["**options"])}):
+-    params = {{{', '.join([f"'{name}': {name}" for name in sig.parameters.keys()])}}}
++{alignment_specialization_init}    params = {{{', '.join([f"'{name}': {name}" for name in sig.parameters.keys()])}}}
+     specialization = [{','.join(specialization)}]
+     return params, specialization, options
+ """
+>>>>>>> maofang/3.7-master

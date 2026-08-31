@@ -172,6 +172,7 @@ def _is_dev_mode():
         return True
 
 
+<<<<<<< HEAD
 def _get_triton_ascend_patch_file():
     patch_files = [
         "CMakeLists.txt",
@@ -199,6 +200,15 @@ def _get_npuir_patch_files():
     patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
     files = []
     with open(os.path.join(_THIS_DIR, patch_path), encoding="utf-8", errors="replace") as f:
+=======
+def _get_patch_files(patch_path):
+    """Return repo-relative paths listed in a unified diff."""
+    path = Path(patch_path)
+    if not path.is_absolute():
+        path = _THIS_DIR / path
+    files = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+>>>>>>> maofang/3.7-master
         for line in f:
             if line.startswith("diff --git a/"):
                 target = line.split(" b/", 1)[-1].rstrip("\n")
@@ -215,6 +225,7 @@ def _apply_npuir_patch():
         raise RuntimeError(f"patch({patch_path}) not found.")
     if not os.path.isdir(npuir_dir):
         raise RuntimeError(f"AscendNPU-IR not found at {npuir_dir}")
+<<<<<<< HEAD
     patch_files = _get_npuir_patch_files()
     if not patch_files:
         raise RuntimeError(f"patch({patch_path}) has no file sections.")
@@ -230,18 +241,34 @@ def _apply_npuir_patch():
     ).stdout.splitlines()
     _checkout_file(tracked, cwd=npuir_dir)
     _normalize_crlf(tracked, cwd=npuir_dir)
+=======
+    patch_files = _get_patch_files(patch_path)
+    if not patch_files:
+        raise RuntimeError(f"patch({patch_path}) has no file sections.")
+    _checkout_file(patch_files, cwd=npuir_dir)
+>>>>>>> maofang/3.7-master
     _apply_patch(patch_path, directory=npuir_dir)
 
 
 def _apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
+<<<<<<< HEAD
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.8.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.8.0.patch")
     patch_files, dev_patch_files = _get_triton_ascend_patch_file()
+=======
+    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
+    patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
+>>>>>>> maofang/3.7-master
     if _is_dev_mode() and os.path.isfile(dev_patch):
-        _checkout_file(dev_patch_files)
+        dev_patch_files = _get_patch_files(dev_patch)
+        if dev_patch_files:
+            _checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
+        patch_files = _get_patch_files(patch)
+        if not patch_files:
+            raise RuntimeError(f"patch({patch}) has no file sections.")
         _checkout_file(patch_files)
         _apply_patch(str(patch))
     _apply_npuir_patch()
@@ -251,9 +278,13 @@ def _get_default_version():
     version_file = _THIS_DIR / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
+<<<<<<< HEAD
     # Fallback tracks the upstream Triton version (3.8.0 since this sync);
     # version.txt is authoritative when present.
     return "3.8.0-dev"
+=======
+    return "3.7.0-dev"
+>>>>>>> maofang/3.7-master
 
 
 def _get_version(is_manylinux, get_git_commit_hash):
@@ -411,7 +442,7 @@ def _get_install_requirements():
         "pybind11",
         "pandas",
         "pyelftools>=0.29",
-        "triton==3.6.0",
+        "triton==3.7.0",
     ]
     return [*install_requires]
 

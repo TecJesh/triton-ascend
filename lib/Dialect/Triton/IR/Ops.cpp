@@ -1137,13 +1137,13 @@ LogicalResult BroadcastOp::verify() {
 }
 
 //-- AddPtrOp --
-// OpFoldResult AddPtrOp::fold(FoldAdaptor adaptor) {
-//   // addptr(ptr, 0) -> ptr
-//   if (matchPattern(adaptor.getOffset(), m_Zero())) {
-//     return getPtr();
-//   }
-//   return {};
-// }
+OpFoldResult AddPtrOp::fold(FoldAdaptor adaptor) {
+  // addptr(ptr, 0) -> ptr
+  if (matchPattern(adaptor.getOffset(), m_Zero())) {
+    return getPtr();
+  }
+  return {};
+}
 
 //-- MakeTensorDescOp --
 void MakeTensorDescOp::build(OpBuilder &builder, OperationState &state,

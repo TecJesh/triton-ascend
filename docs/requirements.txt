@@ -3,8 +3,13 @@ cmake
 sphinx
 matplotlib
 myst_parser
+<<<<<<< HEAD
 myst-sphinx-gallery
 sphinx-rtd-theme
+=======
+sphinx_book_theme
+sphinx_copybutton
+>>>>>>> maofang/3.7-master
 pandas<3.0
 pytest
 sphinx-gallery
