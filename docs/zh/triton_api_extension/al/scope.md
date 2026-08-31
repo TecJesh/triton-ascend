@@ -65,21 +65,163 @@ al.scope 是 triton.language.extra.ascend 模块中的一个上下文管理器�
 
 ## 3. 约束说明
 
-each kernel have 1 scope for cube and vector, inside them they run parallely and there are other syncing operations that declares the sync between both of the scope
+每个 kernel 包含 1 个 cube scope 和 1 个 vector scope，二者内部并行执行，此外还有其他同步操作用于声明两个 scope 之间的同步。
 
-- Parallel Execution: Operations within cube and vector scopes execute in parallel
+- 并行执行：cube scope 和 vector scope 内的操作并行执行
 
-- Single Scope per Type: Each kernel supports one cube scope and one vector scope (?)
+- 每种类型仅限单一 scope：每个 kernel 仅支持一个 cube scope 和一个 vector scope（待确认）
 
-- Explicit Synchronization: Required for data dependencies between scopes using sync operations
+- 显式同步：scope 之间存在数据依赖时，需使用同步操作进行显式同步
 
 ## 4. 用例示例
 
-<table>
-  <tr>
-    <td>Python<br>import os<br><br>os.environ[&quot;TORCH_DEVICE_BACKEND_AUTOLOAD&quot;] = &quot;0&quot;<br><br>import pytest<br><br>import triton<br><br>import triton.language as tl<br><br>import triton.language.extra.cann.extension as al<br><br>from triton.compiler.compiler import ASTSource<br><br>from triton.compiler.code_generator import ast_to_ttir<br><br>from triton._C.libtriton import ir<br><br>from triton._C.libtriton.ascend import ir as ascend_ir<br><br>class Options:<br><br>    num_warps = 4<br><br>    num_stages = 3<br><br>    num_ctas = 1<br><br>    cluster_dims = (1, 1, 1)<br><br>    enable_fp_fusion = True<br><br>    debug = False<br><br>def compile_kernel(kernel, signature, constants):<br><br>    src = ASTSource(kernel, signature, constants)<br><br>    context = ir.context()<br><br>    ir.load_dialects(context)<br><br>    ascend_ir.load_dialects(context)<br><br>    module = ast_to_ttir(kernel, src, context, Options(), {}, {})<br><br>    return str(module)<br><br>@triton.jit<br><br>def kernel_nested_scope(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):<br><br>    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)<br><br>    with al.scope(core_mode=&quot;vector&quot;):<br><br>        with al.scope(core_mode=&quot;vector&quot;):<br><br>            with al.scope(core_mode=&quot;cube&quot;):<br><br>                x = tl.load(x_ptr + i, mask=i &lt; n)<br><br>                y = tl.load(y_ptr + i, mask=i &lt; n)<br><br>                result = x + y<br><br>                tl.store(out_ptr + i, result, mask=i &lt; n)<br><br>@triton.jit<br><br>def kernel_scope_escape(x_ptr, out_ptr, n, BLOCK: tl.constexpr):<br><br>    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)<br><br>    with al.scope(core_mode=&quot;vector&quot;):<br><br>        x = tl.load(x_ptr + i, mask=i &lt; n)<br><br>    a = x + 1.0<br><br>    tl.store(out_ptr + i, a, mask=i &lt; n)<br><br>@triton.jit<br><br>def kernel_scope_cube(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):<br><br>    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)<br><br>    with al.scope(core_mode=&quot;cube&quot;):<br><br>        x = tl.load(x_ptr + i, mask=i &lt; n)<br><br>        y = tl.load(y_ptr + i, mask=i &lt; n)<br><br>        result = x + y<br><br>        tl.store(out_ptr + i, result, mask=i &lt; n)<br><br>@triton.jit<br><br>def kernel_scope_vector(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):<br><br>    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)<br><br>    with al.scope(core_mode=&quot;vector&quot;):<br><br>        x = tl.load(x_ptr + i, mask=i &lt; n)<br><br>        y = tl.load(y_ptr + i, mask=i &lt; n)<br><br>        result = x + y<br><br>        tl.store(out_ptr + i, result, mask=i &lt; n)<br><br>@triton.jit<br><br>def kernel_scope_disable_auto_sync(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):<br><br>    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)<br><br>    with al.scope(core_mode=&quot;vector&quot;, disable_auto_sync=True):<br><br>        x = tl.load(x_ptr + i, mask=i &lt; n)<br><br>        y = tl.load(y_ptr + i, mask=i &lt; n)<br><br>        result = x + y<br><br>        tl.store(out_ptr + i, result, mask=i &lt; n)<br><br>if __name__ == &quot;__main__&quot;:<br><br>    print(&quot;=&quot; * 60)<br><br>    print(&quot;Test 1: Nested Scopes&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    mlir = compile_kernel(<br><br>        kernel_nested_scope, {&quot;x_ptr&quot;: &quot;*fp32&quot;, &quot;y_ptr&quot;: &quot;*fp32&quot;, &quot;out_ptr&quot;: &quot;*fp32&quot;, &quot;n&quot;: &quot;i32&quot;}, {&quot;BLOCK&quot;: 256}<br><br>    )<br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br><br>    print(&quot;\n&quot; + &quot;=&quot; * 60)<br><br>    print(&quot;Test 2: Scope Escape&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    mlir = compile_kernel(kernel_scope_escape, {&quot;x_ptr&quot;: &quot;*fp32&quot;, &quot;out_ptr&quot;: &quot;*fp32&quot;, &quot;n&quot;: &quot;i32&quot;}, {&quot;BLOCK&quot;: 256})<br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br><br>    print(&quot;\n&quot; + &quot;=&quot; * 60)<br><br>    print(&quot;Test 3: Cube Core Mode&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    mlir = compile_kernel(<br><br>        kernel_scope_cube, {&quot;x_ptr&quot;: &quot;*fp32&quot;, &quot;y_ptr&quot;: &quot;*fp32&quot;, &quot;out_ptr&quot;: &quot;*fp32&quot;, &quot;n&quot;: &quot;i32&quot;}, {&quot;BLOCK&quot;: 256}<br><br>    )<br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br><br>    print(&quot;\n&quot; + &quot;=&quot; * 60)<br><br>    print(&quot;Test 4: Vector Core Mode&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    mlir = compile_kernel(<br><br>        kernel_scope_vector, {&quot;x_ptr&quot;: &quot;*fp32&quot;, &quot;y_ptr&quot;: &quot;*fp32&quot;, &quot;out_ptr&quot;: &quot;*fp32&quot;, &quot;n&quot;: &quot;i32&quot;}, {&quot;BLOCK&quot;: 256}<br><br>    )<br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br><br>    print(&quot;\n&quot; + &quot;=&quot; * 60)<br><br>    print(&quot;Test 5: Disable Auto Sync&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    mlir = compile_kernel(<br><br>        kernel_scope_disable_auto_sync,<br><br>        {&quot;x_ptr&quot;: &quot;*fp32&quot;, &quot;y_ptr&quot;: &quot;*fp32&quot;, &quot;out_ptr&quot;: &quot;*fp32&quot;, &quot;n&quot;: &quot;i32&quot;},<br><br>        {&quot;BLOCK&quot;: 256},<br><br>    )<br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br></td>
-  </tr>
-</table>
+```python
+import os
+os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
+import pytest
+import triton
+import triton.language as tl
+import triton.language.extra.cann.extension as al
+from triton.compiler.compiler import ASTSource
+from triton.compiler.code_generator import ast_to_ttir
+from triton._C.libtriton import ir
+from triton._C.libtriton.ascend import ir as ascend_ir
+
+
+class Options:
+    num_warps = 4
+    num_stages = 3
+    num_ctas = 1
+    cluster_dims = (1, 1, 1)
+    enable_fp_fusion = True
+    debug = False
+
+
+def compile_kernel(kernel, signature, constants):
+    src = ASTSource(kernel, signature, constants)
+
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+
+    module = ast_to_ttir(kernel, src, context, Options(), {}, {})
+    return str(module)
+
+
+@triton.jit
+def kernel_nested_scope(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+
+    with al.scope(core_mode="vector"):
+        with al.scope(core_mode="vector"):
+            with al.scope(core_mode="cube"):
+                x = tl.load(x_ptr + i, mask=i < n)
+                y = tl.load(y_ptr + i, mask=i < n)
+                result = x + y
+                tl.store(out_ptr + i, result, mask=i < n)
+
+
+@triton.jit
+def kernel_scope_escape(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+
+    with al.scope(core_mode="vector"):
+        x = tl.load(x_ptr + i, mask=i < n)
+
+    a = x + 1.0
+    tl.store(out_ptr + i, a, mask=i < n)
+
+
+@triton.jit
+def kernel_scope_cube(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+
+    with al.scope(core_mode="cube"):
+        x = tl.load(x_ptr + i, mask=i < n)
+        y = tl.load(y_ptr + i, mask=i < n)
+        result = x + y
+        tl.store(out_ptr + i, result, mask=i < n)
+
+
+@triton.jit
+def kernel_scope_vector(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+
+    with al.scope(core_mode="vector"):
+        x = tl.load(x_ptr + i, mask=i < n)
+        y = tl.load(y_ptr + i, mask=i < n)
+        result = x + y
+        tl.store(out_ptr + i, result, mask=i < n)
+
+
+@triton.jit
+def kernel_scope_disable_auto_sync(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+
+    with al.scope(core_mode="vector", disable_auto_sync=True):
+        x = tl.load(x_ptr + i, mask=i < n)
+        y = tl.load(y_ptr + i, mask=i < n)
+        result = x + y
+        tl.store(out_ptr + i, result, mask=i < n)
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Test 1: Nested Scopes")
+    print("=" * 60)
+
+    mlir = compile_kernel(
+        kernel_nested_scope, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256}
+    )
+
+    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+
+    print("\n" + "=" * 60)
+    print("Test 2: Scope Escape")
+    print("=" * 60)
+
+    mlir = compile_kernel(kernel_scope_escape, {"x_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256})
+
+    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+
+    print("\n" + "=" * 60)
+    print("Test 3: Cube Core Mode")
+    print("=" * 60)
+
+    mlir = compile_kernel(
+        kernel_scope_cube, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256}
+    )
+
+    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+
+    print("\n" + "=" * 60)
+    print("Test 4: Vector Core Mode")
+    print("=" * 60)
+
+    mlir = compile_kernel(
+        kernel_scope_vector, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256}
+    )
+
+    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+
+    print("\n" + "=" * 60)
+    print("Test 5: Disable Auto Sync")
+    print("=" * 60)
+
+    mlir = compile_kernel(
+        kernel_scope_disable_auto_sync,
+        {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+        {"BLOCK": 256},
+    )
+
+    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+```
 
 ## 5. 编译输出结果
 
