@@ -30,13 +30,13 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
 
 
 def _brev(x):
-    """Reverse the 32-bit representation of x."""
+    """Reverse the 32-bit representation of x, returned as signed int32."""
     v = int(x) & 0xFFFFFFFF
     r = 0
     for _ in range(32):
         r = (r << 1) | (v & 1)
         v >>= 1
-    return r
+    return r - 0x100000000 if r & 0x80000000 else r
 
 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
