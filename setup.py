@@ -585,11 +585,7 @@ def get_triton_version_suffix():
 
 
 # keep it separate for easy substitution
-<<<<<<< HEAD
 TRITON_VERSION = "3.8.0" + get_triton_version_suffix()
-=======
-TRITON_VERSION = "3.7.0" + get_triton_version_suffix()
->>>>>>> maofang/3.7-master
 
 # Dynamically define supported Python versions and classifiers
 MIN_PYTHON = (3, 10)

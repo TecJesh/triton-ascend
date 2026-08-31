@@ -38,15 +38,8 @@ except Exception:
         return False
 
 
-<<<<<<< HEAD
 pytestmark = pytest.mark.skip(
     reason="tl.make_block_ptr/tl.advance were removed in upstream main; case needs re-adaptation")
-=======
-pytestmark = pytest.mark.skipif(
-    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="StridedAxisCoalescing native validation requires an Ascend 910_95/A5 toolchain",
-)
->>>>>>> maofang/3.7-master
 
 
 @triton.jit

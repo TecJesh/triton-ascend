@@ -211,23 +211,11 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         Path(src_path).write_text(ttir_code)
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
-<<<<<<< HEAD
-        enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
-        enable_select_analysis = metadata["enable_select_analysis"]
-        # NPUOptions defaults these flags to None; coerce to bool so the C++
-        # pass-option bindings never receive a NoneType.
-        compile_on_910_95 = bool(metadata["compile_on_910_95"])
-        force_simt_template = bool(metadata["force_simt_template"])
-        enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
-        optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
-        auto_blockify_size = metadata["auto_blockify_size"]
-=======
         # Select analysis is a fixed lowering policy, not a user compile option.
         enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
         compile_mode = opt.compile_mode
         metadata["compile_mode"] = compile_mode
->>>>>>> maofang/3.7-master
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
