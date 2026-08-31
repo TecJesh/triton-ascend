@@ -188,8 +188,8 @@ def _get_patch_files(patch_path):
 
 
 def _apply_npuir_patch():
-    """Apply AscendNPU-IR adaptations for LLVM 23 (Triton Ascend 3.7)."""
-    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    """Apply AscendNPU-IR adaptations for LLVM 24 (Triton Ascend 3.8)."""
+    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_24.patch")
     npuir_dir = os.path.join("third_party", "ascend", "AscendNPU-IR")
     if not os.path.isfile(patch_path):
         raise RuntimeError(f"patch({patch_path}) not found.")
@@ -470,7 +470,7 @@ def _patch_module(mod):
 
             orig_check_call = subprocess.check_call
             asc_extra_args = list(_get_ascend_cmake_args())
-            asc_extra_args.append("-DLLVM_MAJOR_VERSION_23_COMPATIBLE=ON")
+            asc_extra_args.append("-DLLVM_MAJOR_VERSION_24_COMPATIBLE=ON")
             if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
                 asc_extra_args.append("-DTRITON_BUILD_TD=ON")
             else:

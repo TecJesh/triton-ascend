@@ -61,7 +61,7 @@ index de78a38a56..ed0dde3527 100644
  else()
    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
  endif()
-@@ -305,6 +329,32 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
+@@ -305,5 +329,44 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
    link_libraries(stdc++fs)
  endif()
  
@@ -91,9 +91,21 @@ index de78a38a56..ed0dde3527 100644
 +  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
 +  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
 +endif()
++
++# LLVM 24 adaptations (Triton Ascend 3.8 main). Enables 21/22/23 macros as well.
++option(LLVM_MAJOR_VERSION_24_COMPATIBLE "NPUIR build with LLVM 24 or later" OFF)
++if(LLVM_MAJOR_VERSION_24_COMPATIBLE)
++  message(STATUS "[TA]Building AscendNPU IR with LLVM 24 or later")
++  set(LLVM_MAJOR_VERSION_21_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_22_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_23_COMPATIBLE ON)
++  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++endif()
  ################################################################################
  # Python module
- ################################################################################
 @@ -337,11 +387,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
      target_compile_definitions(nanobind-static PUBLIC Py_LIMITED_API=0x030C0000)
    endif()
