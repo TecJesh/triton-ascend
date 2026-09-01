@@ -1,0 +1,624 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index defa75878..a6e14ea6c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -33,6 +33,37 @@
+ if(LLVM_MAJOR_VERSION_20_COMPATIBLE)
+   message(STATUS "Building with LLVM 20 or later")
+   add_definitions(-D__LLVM_MAJOR_VERSION_20_COMPATIBLE__)
++endif()
++
++# LLVM 23 (e.g. Triton Ascend 3.7) needs additional API adaptations on top of 21/22.
++option(LLVM_MAJOR_VERSION_23_COMPATIBLE "NPUIR build with LLVM 23 or later" OFF)
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  message(STATUS "Building with LLVM 23 or later")
++  set(LLVM_MAJOR_VERSION_21_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_22_COMPATIBLE ON)
++  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++  # MLIR OpBuilder::create<OpTy> is deprecated in LLVM 23; keep as warning under -Werror.
++  if(NOT MSVC)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
++  endif()
++endif()
++
++# LLVM 24 (e.g. Triton Ascend 3.8 main) needs additional API adaptations on top of 21/22/23.
++option(LLVM_MAJOR_VERSION_24_COMPATIBLE "NPUIR build with LLVM 24 or later" OFF)
++if(LLVM_MAJOR_VERSION_24_COMPATIBLE)
++  message(STATUS "Building with LLVM 24 or later")
++  set(LLVM_MAJOR_VERSION_21_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_22_COMPATIBLE ON)
++  set(LLVM_MAJOR_VERSION_23_COMPATIBLE ON)
++  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++  add_definitions(-D__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++  if(NOT MSVC)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
++  endif()
+ endif()
+ # -------------------------------------------------------------------------------
+ # Handle Option
+diff --git a/bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt
+index 8a5188721..71c829463 100644
+--- a/bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt
++++ b/bishengir/include/bishengir/Dialect/HFusion/IR/CMakeLists.txt
+@@ -8,6 +8,12 @@
+ endif()
+ if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
+   list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_24_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
+ endif()
+ 
+ # Declare a function to generate ODS with bishengir-hfusion-ods-yaml-gen
+@@ -56,8 +62,8 @@
+ 
+ # TODO: Better to do it with the add_bishengir_dialect()
+ set(LLVM_TARGET_DEFINITIONS HFusionOps.td)
+-mlir_tablegen(HFusionOps.h.inc -gen-op-decls)
+-mlir_tablegen(HFusionOps.cpp.inc -gen-op-defs)
++mlir_tablegen(HFusionOps.h.inc -gen-op-decls ${tblgen_feat_list})
++mlir_tablegen(HFusionOps.cpp.inc -gen-op-defs ${tblgen_feat_list})
+ mlir_tablegen(HFusionOpsTypes.h.inc -gen-typedef-decls -typedefs-dialect=hfusion)
+ mlir_tablegen(HFusionOpsTypes.cpp.inc -gen-typedef-defs -typedefs-dialect=hfusion)
+ mlir_tablegen(HFusionOpsDialect.h.inc -gen-dialect-decls -dialect=hfusion ${tblgen_feat_list})
+diff --git a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
+index c27ce733c..c6f4290f9 100644
+--- a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
++++ b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
+@@ -153,13 +153,21 @@
+ 
+ }
+ 
++// LLVM 23 ODS emits `using Trait::reifyResultShapes` instead of an op-class
++// declaration, so out-of-line definitions need an explicit extraClassDeclaration.
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++defvar ReifyShapesTrait = ReifyRankedShapedTypeOpInterface;
++#else
++defvar ReifyShapesTrait = DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>;
++#endif
++
+ //===----------------------------------------------------------------------===//
+ // InterleaveOp
+ //===----------------------------------------------------------------------===//
+ 
+ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
+                                              SameOperandsAndResultRank,
+-                                             DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
++                                             ReifyShapesTrait,
+                                              AllTypesMatch<["input"]>]> {
+   let summary = [{
+       Constructs one tensor by interleaving n input tensors.
+@@ -174,9 +182,16 @@
+ 
+   let arguments = (ins Variadic<AnyTypeOf<[AnyRankedTensor]>>:$input);
+   let results = (outs AnyTypeOf<[AnyRankedTensor]>:$output);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
+   let extraClassDeclaration = [{
+     static int64_t getInterLeaveChannelNums() {return 2;}
+-  }];
++    LogicalResult reifyResultShapes(OpBuilder &b, ReifiedRankedShapedTypeDims &reifiedReturnShapes);
++  }];
++#else
++  let extraClassDeclaration = [{
++    static int64_t getInterLeaveChannelNums() {return 2;}
++  }];
++#endif
+   let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
+   let hasVerifier = 1;
+ }
+@@ -187,7 +202,7 @@
+ 
+ def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
+                                                  SameOperandsAndResultRank,
+-                                                 DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
++                                                 ReifyShapesTrait,
+                                                  AllTypesMatch<["output"]>]> {
+   let summary = [{
+     Constructs two tensors by deinterleaving an input tensor
+@@ -206,10 +221,18 @@
+     * 1: Output only channel 1 (odd indexes)
+   }];
+ 
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
+   let extraClassDeclaration = [{
+     static int64_t getDeInterLeaveChannelNum() { return 2; }
+     int64_t getDeInterLeaveChannelIdx();
+-  }];
++    LogicalResult reifyResultShapes(OpBuilder &b, ReifiedRankedShapedTypeDims &reifiedReturnShapes);
++  }];
++#else
++  let extraClassDeclaration = [{
++    static int64_t getDeInterLeaveChannelNum() { return 2; }
++    int64_t getDeInterLeaveChannelIdx();
++  }];
++#endif
+ 
+   let arguments = (ins AnyTypeOf<[AnyRankedTensor]>:$input,
+                        I64Attr:$channelIndex);
+@@ -322,7 +345,11 @@
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                        DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
+   let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64, F8E4M3FN, F8E5M2]>:$output);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims (`reverse` `=` $reverse^)? `->` type($output)";
++#else
+   let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
++#endif
+   let hasVerifier = 1;
+   let hasCanonicalizer = 1;
+ }
+@@ -346,7 +373,11 @@
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                        DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
+   let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64]>:$output);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims (`reverse` `=` $reverse^)? `->` type($output)";
++#else
+   let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
++#endif
+   let hasVerifier = 1;
+ }
+ 
+@@ -618,12 +649,21 @@
+                        DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
+                        I64Attr:$sort_axis);
+   let results = (outs Variadic<AnyRankedTensor>:$result);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = [{
++    attr-dict `ins` `(` $src `:` type($src) `)`
++    (`descending` `=` $descending^)?
++    `sort_axis` `=` $sort_axis
++    (`->` type($result)^)?
++  }];
++#else
+   let assemblyFormat = [{
+     attr-dict `ins` `(` $src `:` type($src) `)`
+     `descending` `=` $descending
+     `sort_axis` `=` $sort_axis
+     (`->` type($result)^)?
+   }];
++#endif
+   let hasVerifier = 1;
+   let extraClassDeclaration = [{
+     // Get Signed Sort Axis
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt
+index fd663b8b0..794b79086 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt
+@@ -1,13 +1,25 @@
+ set(tblgen_feat_list)
+ if(BISHENGIR_BUILD_STANDALONE_IR_ONLY)
+   list(APPEND tblgen_feat_list -DBISHENGIR_BUILD_STANDALONE_IR_ONLY)
++endif()
++if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_24_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
+ endif()
+ 
+ set(LLVM_TARGET_DEFINITIONS HIVMOps.td)
+ mlir_tablegen(HIVMDialect.h.inc -gen-dialect-decls -dialect=hivm ${tblgen_feat_list})
+ mlir_tablegen(HIVMDialect.cpp.inc -gen-dialect-defs -dialect=hivm ${tblgen_feat_list})
+-mlir_tablegen(HIVMOps.h.inc -gen-op-decls)
+-mlir_tablegen(HIVMOps.cpp.inc -gen-op-defs)
++mlir_tablegen(HIVMOps.h.inc -gen-op-decls ${tblgen_feat_list})
++mlir_tablegen(HIVMOps.cpp.inc -gen-op-defs ${tblgen_feat_list})
+ add_public_tablegen_target(BiShengIRHIVMIncGen)
+ 
+ set(LLVM_TARGET_DEFINITIONS HIVMInterfaces.td)
+@@ -29,8 +41,8 @@
+ add_dependencies(mlir-headers BiShengIRHIVMMacroOpsIncGen)
+ 
+ set(LLVM_TARGET_DEFINITIONS HIVMVectorOps.td)
+-mlir_tablegen(HIVMVectorOps.h.inc -gen-op-decls)
+-mlir_tablegen(HIVMVectorOps.cpp.inc -gen-op-defs)
++mlir_tablegen(HIVMVectorOps.h.inc -gen-op-decls ${tblgen_feat_list})
++mlir_tablegen(HIVMVectorOps.cpp.inc -gen-op-defs ${tblgen_feat_list})
+ add_public_tablegen_target(BiShengIRHIVMVectorOpsIncGen)
+ add_dependencies(mlir-headers BiShengIRHIVMVectorOpsIncGen)
+ 
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+index 10bf42dd9..e03dcc323 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+@@ -130,7 +130,11 @@
+   }];
+   let arguments = (ins HIVM_AtomicKindAttr:$kind,
+                        OptionalAttr<TypeAttr>:$type);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = "`kind` `=` $kind (`type` `=` $type^)? attr-dict";
++#else
+   let assemblyFormat = "`kind` `=` $kind `[` `type` `=` $type `]` attr-dict";
++#endif
+ }
+ 
+ def SetCtrlOp : HIVM_Op<"set_ctrl"> {
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
+index ffb66a4fa..c3ad362c6 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
+@@ -86,9 +86,19 @@
+       (`transpose` `=` $transpose^)?
+       (`->` type($result)^)?
+   }];
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // Match FlattenInterface by-value signature to avoid overload ambiguity on LLVM 23+.
++  code flattenGetDecl = [{
++    FailureOr<mlir::hivm::FlattenResult> getFlattened(mlir::hivm::FlattenOptions options) {
++  }];
++#else
++  code flattenGetDecl = [{
++    FailureOr<mlir::hivm::FlattenResult> getFlattened(mlir::hivm::FlattenOptions &options) {
++  }];
++#endif
+   code elementwiseDeclaration = [{
+     /// Elementwise reassociation group is not included in redistribute like because it has transpose
+-    FailureOr<mlir::hivm::FlattenResult> getFlattened(mlir::hivm::FlattenOptions &options) {
++  }] # flattenGetDecl # [{
+       return mlir::hivm::detail::getFlattenedElementwise(*this, options);
+     }
+     SmallVector<int64_t> getLimitedAxes() {
+@@ -1986,6 +1996,16 @@
+                   "bool":$reverse)>
+     ];
+   let results = (outs Variadic<AnyRankedTensor>:$result);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = [{
++    attr-dict `ins` `(` $src `:` type($src) `)`
++    `outs` `(` $dst `:` type($dst) `)`
++    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
++    `cum_dims` `=` $cum_dims
++    (`reverse` `=` $reverse^)?
++    (`->` type($result)^)?
++  }];
++#else
+   let assemblyFormat = [{
+     attr-dict `ins` `(` $src `:` type($src) `)`
+     `outs` `(` $dst `:` type($dst) `)`
+@@ -1994,6 +2014,7 @@
+     `reverse` `=` $reverse
+     (`->` type($result)^)?
+   }];
++#endif
+   let hasCanonicalizer = 1;
+   let hasVerifier = 1;
+   let extraClassDeclaration = vectorOpBaseDecls # [{
+@@ -2056,6 +2077,16 @@
+                    "bool":$reverse)>
+   ];
+   let results = (outs Variadic<AnyRankedTensor>:$result);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = [{
++    attr-dict `ins` `(` $src `:` type($src) `)`
++    `outs` `(` $dst `:` type($dst) `)`
++    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
++    `cum_dims` `=` $cum_dims
++    (`reverse` `=` $reverse^)?
++    (`->` type($result)^)?
++  }];
++#else
+   let assemblyFormat = [{
+     attr-dict `ins` `(` $src `:` type($src) `)`
+     `outs` `(` $dst `:` type($dst) `)`
+@@ -2064,6 +2095,7 @@
+     `reverse` `=` $reverse
+     (`->` type($result)^)?
+   }];
++#endif
+   let hasCanonicalizer = 1;
+   let hasVerifier = 1;
+   let extraClassDeclaration = vectorOpBaseDecls # [{
+@@ -2260,6 +2292,16 @@
+                        DefaultValuedAttr<I64Attr, "-1">:$sort_axis
+   );
+   let results = (outs Variadic<AnyRankedTensor>:$result);
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  let assemblyFormat = [{
++    attr-dict `ins` `(` $src `:` type($src) `)`
++    `outs` `(` $dst `:` type($dst) `)`
++    (`descending` `=` $descending^)?
++    `sort_axis` `=` $sort_axis
++    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
++    (`->` type($result)^)?
++  }];
++#else
+   let assemblyFormat = [{
+     attr-dict `ins` `(` $src `:` type($src) `)`
+     `outs` `(` $dst `:` type($dst) `)`
+@@ -2268,6 +2310,7 @@
+     (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+     (`->` type($result)^)?
+   }];
++#endif
+   let builders = [
+     OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                    "ValueRange":$dst, "bool":$descending, "int64_t":$sort_axis)>];
+diff --git a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
+index e01fb87be..60879882d 100644
+--- a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
++++ b/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
+@@ -1,8 +1,22 @@
++set(tblgen_feat_list)
++if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_23_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++endif()
++if(LLVM_MAJOR_VERSION_24_COMPATIBLE)
++  list(APPEND tblgen_feat_list -D__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++endif()
++
+ set(LLVM_TARGET_DEFINITIONS ScopeOps.td)
+-mlir_tablegen(ScopeDialect.h.inc -gen-dialect-decls -dialect=scope)
+-mlir_tablegen(ScopeDialect.cpp.inc -gen-dialect-defs -dialect=scope)
+-mlir_tablegen(ScopeOps.h.inc -gen-op-decls)
+-mlir_tablegen(ScopeOps.cpp.inc -gen-op-defs)
++mlir_tablegen(ScopeDialect.h.inc -gen-dialect-decls -dialect=scope ${tblgen_feat_list})
++mlir_tablegen(ScopeDialect.cpp.inc -gen-dialect-defs -dialect=scope ${tblgen_feat_list})
++mlir_tablegen(ScopeOps.h.inc -gen-op-decls ${tblgen_feat_list})
++mlir_tablegen(ScopeOps.cpp.inc -gen-op-defs ${tblgen_feat_list})
+ add_public_tablegen_target(BiShengIRScopeIncGen)
+ 
+ add_bishengir_doc(ScopeOps ScopeDialect Dialects/ -gen-dialect-doc -dialect=scope)
+diff --git a/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td b/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
+index 14063506d..f83416d88 100644
+--- a/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
++++ b/bishengir/include/bishengir/Dialect/Scope/IR/ScopeOps.td
+@@ -31,10 +31,18 @@
+ // Scope Dialect operations.
+ //===----------------------------------------------------------------------===//
+ 
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++defvar ScopeRegionBranchMethods = [
++    "getNumRegionInvocations", "getRegionInvocationBounds",
++    "getEntrySuccessorRegions", "getSuccessorInputs"];
++#else
++defvar ScopeRegionBranchMethods = [
++    "getNumRegionInvocations", "getRegionInvocationBounds",
++    "getEntrySuccessorRegions"];
++#endif
++
+ def ScopeOp : Scope_Op<"scope", [
+-    DeclareOpInterfaceMethods<RegionBranchOpInterface, [
+-    "getNumRegionInvocations", "getRegionInvocationBounds",
+-    "getEntrySuccessorRegions"]>,
++    DeclareOpInterfaceMethods<RegionBranchOpInterface, ScopeRegionBranchMethods>,
+     NoRegionArguments,
+     SingleBlockImplicitTerminator<"scope::ReturnOp">,
+     SingleBlock,
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
+index f96bfdb8f..b4e19e8c0 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
+@@ -99,7 +99,12 @@
+     termIface.getSuccessorRegions(operandAttrs, successors);
+     return;
+   }
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 23: getSuccessorRegions takes Region& (not Region*).
++  branchOp.getSuccessorRegions(*terminator->getParentRegion(), successors);
++#else
+   branchOp.getSuccessorRegions(terminator->getParentRegion(), successors);
++#endif
+ }
+ 
+ static bool userCanReachMatmulOuts(Value current,
+@@ -131,7 +136,12 @@
+       SmallVector<RegionSuccessor> successors;
+       getTerminatorSuccessorRegions(user, branchOp, successors);
+       for (const RegionSuccessor &successor : successors) {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++        // LLVM 23: successor inputs moved to RegionBranchOpInterface.
++        ValueRange inputs = branchOp.getSuccessorInputs(successor);
++#else
+         ValueRange inputs = successor.getSuccessorInputs();
++#endif
+         if (idx.value() >= inputs.size())
+           continue;
+         if (userCanReachMatmulOuts(inputs[idx.value()], visited))
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+index f71750119..4f798a475 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+@@ -837,7 +837,12 @@
+ 
+ struct AnchorResource
+     : public mlir::SideEffects::Resource::Base<AnchorResource> {
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  // LLVM 24: SideEffects::Resource::getName() is const.
++  StringRef getName() const override { return "<Anchor>"; }
++#else
+   mlir::StringRef getName() final { return "<Anchor>"; }
++#endif
+ };
+ 
+ void mlir::hivm::AnchorOp::getEffects(
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+index 5ee46df7d..a6aa1d0aa 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+@@ -397,7 +397,12 @@
+       FailureOr<int64_t> upperBound =
+           ValueBoundsConstraintSet::computeConstantBound(
+               presburger::BoundType::UB, dynSize,
+-              /*stopCondition=*/nullptr, /*closedUB=*/true);
++          /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++          ValueBoundsOptions{.closedUB = true});
++#else
++          /*closedUB=*/true);
++#endif
+       if (failed(upperBound)) {
+         upperBound = resolveDynamicDimToBound(dynSize);
+       }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
+index 3d733988a..a76aeed4b 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
+@@ -423,8 +423,13 @@
+   SmallVector<RegionSuccessor, 2> entrySuccessors;
+   branch.getSuccessorRegions(RegionBranchPoint::parent(), entrySuccessors);
+   for (RegionSuccessor &entrySuccessor : entrySuccessors) {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++    ValueRange entryInputs = branch.getSuccessorInputs(entrySuccessor);
++#else
++    ValueRange entryInputs = entrySuccessor.getSuccessorInputs();
++#endif
+     appendRegionFlowEdges(branch.getEntrySuccessorOperands(entrySuccessor),
+-                          entrySuccessor.getSuccessorInputs(), edges);
++                          entryInputs, edges);
+   }
+ 
+   for (Region &region : branch->getRegions()) {
+@@ -436,8 +441,13 @@
+             block.getTerminator());
+         if (!terminator)
+           continue;
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++        ValueRange succInputs = branch.getSuccessorInputs(successorRegion);
++#else
++        ValueRange succInputs = successorRegion.getSuccessorInputs();
++#endif
+         appendRegionFlowEdges(terminator.getSuccessorOperands(successorRegion),
+-                              successorRegion.getSuccessorInputs(), edges);
++                              succInputs, edges);
+       }
+     }
+   }
+diff --git a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
+index ddce73a76..2e9f70747 100644
+--- a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
++++ b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
+@@ -68,12 +68,28 @@
+ void ScopeOp::getSuccessorRegions(RegionBranchPoint point,
+                                   SmallVectorImpl<RegionSuccessor> &regions) {
+   if (!point.isParent()) {
++#if defined(__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++    regions.push_back(RegionSuccessor(getOperation()));
++#elif defined(__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++    regions.push_back(RegionSuccessor::parent());
++#else
+     regions.push_back(RegionSuccessor(getResults()));
++#endif
+     return;
+   }
+ 
+   regions.push_back(RegionSuccessor(&getRegion()));
+ }
++
++#if defined(__LLVM_MAJOR_VERSION_23_COMPATIBLE__) || defined(__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++ValueRange ScopeOp::getSuccessorInputs(RegionSuccessor successor) {
++#if defined(__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++  return successor.isOperation() ? getResults() : ValueRange();
++#else
++  return successor.isParent() ? getResults() : ValueRange();
++#endif
++}
++#endif
+ 
+ void ScopeOp::getEntrySuccessorRegions(
+     ArrayRef<Attribute> operands, SmallVectorImpl<RegionSuccessor> &regions) {
+diff --git a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
+index dcb47d297..6387a64ea 100644
+--- a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
++++ b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
+@@ -32,7 +32,11 @@
+   auto bound = ValueBoundsConstraintSet::computeConstantBound(
+       type, ValueBoundsConstraintSet::Variable(value),
+       /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++      ValueBoundsOptions{.closedUB = type == presburger::BoundType::UB});
++#else
+       /*closedUB=*/type == presburger::BoundType::UB);
++#endif
+   if (succeeded(bound)) {
+     return *bound;
+   }
+diff --git a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+index 71ddcbdcf..cd03718d0 100644
+--- a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
++++ b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+@@ -42,7 +42,11 @@
+   auto ub = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, v,
+       /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++      ValueBoundsOptions{.closedUB = true});
++#else
+       /*closedUB=*/true);
++#endif
+   if (failed(ub) || *lb != *ub)
+     return std::nullopt;
+   return *lb;
+@@ -109,7 +113,11 @@
+   auto ivUB = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, iv,
+       /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++      ValueBoundsOptions{.closedUB = true});
++#else
+       /*closedUB=*/true);
++#endif
+   if (failed(ivLB) || failed(ivUB))
+     return false;
+   if (*ivLB != *ivUB)
+@@ -259,6 +267,15 @@
+ };
+ 
+ static IndexValueConstantBounds computeIndexValueConstantBounds(Value value) {
++#ifdef __LLVM_MAJOR_VERSION_24_COMPATIBLE__
++  ValueBoundsOptions closedUB{.closedUB = true};
++  return {
++      ValueBoundsConstraintSet::computeConstantBound(
++          presburger::BoundType::LB, value, /*stopCondition=*/nullptr, closedUB),
++      ValueBoundsConstraintSet::computeConstantBound(
++          presburger::BoundType::UB, value, /*stopCondition=*/nullptr, closedUB),
++  };
++#else
+   return {
+       ValueBoundsConstraintSet::computeConstantBound(
+           presburger::BoundType::LB, value,
+@@ -269,6 +286,7 @@
+           /*stopCondition=*/nullptr,
+           /*closedUB=*/true),
+   };
++#endif
+ }
+ 
+ static void tryRecordConstantBounds(
+diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
+index b3f5cf9a2..da6bf386b 100644
+--- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
++++ b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
+@@ -876,7 +876,13 @@
+   }
+   // And the default region branches transparently back to the parent.
+   assert(src.getRegionOrNull() == &getDefaultRegion());
++#if defined(__LLVM_MAJOR_VERSION_24_COMPATIBLE__)
++  successors.push_back(RegionSuccessor(getOperation()));
++#elif defined(__LLVM_MAJOR_VERSION_23_COMPATIBLE__)
++  successors.push_back(RegionSuccessor::parent());
++#else
+   successors.push_back(RegionSuccessor(getResults()));
++#endif
+ }
+ 
+ LogicalResult WarpSpecializeOp::verify() {

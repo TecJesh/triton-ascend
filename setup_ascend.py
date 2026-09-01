@@ -172,33 +172,13 @@ def _is_dev_mode():
         return True
 
 
-def _get_triton_ascend_patch_file():
-    patch_files = [
-        "CMakeLists.txt",
-        "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
-        "lib/Dialect/Triton/IR/Traits.cpp",
-        "python/src/ir.cc",
-        "python/triton/_utils.py",
-        "python/triton/compiler/code_generator.py",
-        "python/triton/compiler/compiler.py",
-        "python/triton/compiler/errors.py",
-        "python/triton/language/math.py",
-        "python/triton/language/semantic.py",
-        "python/triton/language/standard.py",
-        "python/triton/runtime/interpreter.py",
-        "python/triton/runtime/jit.py",
-        "bin/RegisterTritonDialects.h",
-        "bin/triton-opt.cpp",
-        "bin/CMakeLists.txt",
-    ]
-    dev_patch_files = ["python/triton/runtime/autotuner.py"]
-    return patch_files, dev_patch_files
-
-
-def _get_npuir_patch_files():
-    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+def _get_patch_files(patch_path):
+    """Return repo-relative paths listed in a unified diff."""
+    path = Path(patch_path)
+    if not path.is_absolute():
+        path = _THIS_DIR / path
     files = []
-    with open(os.path.join(_THIS_DIR, patch_path), encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             if line.startswith("diff --git a/"):
                 target = line.split(" b/", 1)[-1].rstrip("\n")
@@ -208,14 +188,14 @@ def _get_npuir_patch_files():
 
 
 def _apply_npuir_patch():
-    """Apply AscendNPU-IR adaptations for LLVM 23 (Triton Ascend 3.7)."""
-    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    """Apply AscendNPU-IR adaptations for LLVM 24 (Triton Ascend 3.8)."""
+    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_24.patch")
     npuir_dir = os.path.join("third_party", "ascend", "AscendNPU-IR")
     if not os.path.isfile(patch_path):
         raise RuntimeError(f"patch({patch_path}) not found.")
     if not os.path.isdir(npuir_dir):
         raise RuntimeError(f"AscendNPU-IR not found at {npuir_dir}")
-    patch_files = _get_npuir_patch_files()
+    patch_files = _get_patch_files(patch_path)
     if not patch_files:
         raise RuntimeError(f"patch({patch_path}) has no file sections.")
     # Restore only files tracked at HEAD; new-file sections are created
@@ -235,13 +215,17 @@ def _apply_npuir_patch():
 
 def _apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
-    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
-    patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
-    patch_files, dev_patch_files = _get_triton_ascend_patch_file()
+    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.8.0.patch")
+    patch = os.path.join(patch_path, "triton-ascend-3.8.0.patch")
     if _is_dev_mode() and os.path.isfile(dev_patch):
-        _checkout_file(dev_patch_files)
+        dev_patch_files = _get_patch_files(dev_patch)
+        if dev_patch_files:
+            _checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
+        patch_files = _get_patch_files(patch)
+        if not patch_files:
+            raise RuntimeError(f"patch({patch}) has no file sections.")
         _checkout_file(patch_files)
         _apply_patch(str(patch))
     _apply_npuir_patch()
@@ -411,7 +395,7 @@ def _get_install_requirements():
         "pybind11",
         "pandas",
         "pyelftools>=0.29",
-        "triton==3.6.0",
+        "triton==3.7.0",
     ]
     return [*install_requires]
 
@@ -486,7 +470,7 @@ def _patch_module(mod):
 
             orig_check_call = subprocess.check_call
             asc_extra_args = list(_get_ascend_cmake_args())
-            asc_extra_args.append("-DLLVM_MAJOR_VERSION_23_COMPATIBLE=ON")
+            asc_extra_args.append("-DLLVM_MAJOR_VERSION_24_COMPATIBLE=ON")
             if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
                 asc_extra_args.append("-DTRITON_BUILD_TD=ON")
             else:

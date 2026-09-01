@@ -79,7 +79,7 @@ void init_buffer_ir(py::module_ &m) {
              // TODO: We need to add a pass before OneShotBufferize to generate
              // MemorySpaceCastOp
              Operation *memref =
-                 self.create<bufferization::ToBufferOp>(memrefType, src);
+                 self.create<bufferization::ToMemrefOp>(memrefType, src);
              if (addressSpace) {
                memref = self.create<memref::MemorySpaceCastOp>(
                    MemRefType::get(memrefType.getShape(),

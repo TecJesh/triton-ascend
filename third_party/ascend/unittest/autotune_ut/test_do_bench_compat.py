@@ -47,6 +47,7 @@ def _make_tuner(do_bench):
 def _make_run_tuner(configs):
     key = ("disk-cache-key", )
     tuner = object.__new__(AutoTilingTuner)
+    tuner.arg_names = []
     tuner.cache = {}
     tuner.is_simt_mode = False
     tuner.simt_stack_limit = 8192
@@ -58,7 +59,8 @@ def _make_run_tuner(configs):
     tuner.auto_profile_dir = None
     tuner.nargs = {}
     tuner.pre_hook = lambda kwargs, reset_only=False: None
-    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: "kernel-result")
+    tuner.run_kwargs = []
+    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: tuner.run_kwargs.append(kwargs) or "kernel-result")
     return tuner, key
 
 
@@ -245,7 +247,7 @@ def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):
 
 
 def test_run_keeps_gc_on_single_config_cache_miss(monkeypatch):
-    tuner, _ = _make_run_tuner([Config({"BLOCK_SIZE": 16})])
+    tuner, _ = _make_run_tuner([Config({"BLOCK_SIZE": 16, "compile_mode": "simt_only"})])
     gc_calls = []
     profile_calls = []
 
@@ -258,5 +260,6 @@ def test_run_keeps_gc_on_single_config_cache_miss(monkeypatch):
     monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
+    assert tuner.run_kwargs[-1]["simt_stack_limit"] == 8192
     assert gc_calls == [True]
     assert profile_calls == []
