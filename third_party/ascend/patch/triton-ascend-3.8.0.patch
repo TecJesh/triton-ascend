@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index de78a38a56..ed0dde3527 100644
+index de78a38a5..103d8940b 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -13,18 +13,27 @@ set(CMAKE_CXX_STANDARD 17)
+@@ -13,18 +13,27 @@
  set(CMAKE_INCLUDE_CURRENT_DIR ON)
  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
  
@@ -30,7 +30,7 @@ index de78a38a56..ed0dde3527 100644
  set(TRITON_VERSION "" CACHE STRING "Triton version string (passed from setup.py)")
  
  set(TRITON_CACHE_PATH "" CACHE PATH "Path to triton cache")
-@@ -259,6 +268,21 @@ function(add_triton_library name)
+@@ -259,6 +268,21 @@
    set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
    add_triton_object(${name} ${ARGN})
    target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
@@ -52,7 +52,7 @@ index de78a38a56..ed0dde3527 100644
  endfunction()
  
  set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
-@@ -282,7 +306,7 @@ if(NOT MSVC)
+@@ -282,7 +306,7 @@
      # crash a Triton not compiled with visibility due to missing symbols.
      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTRITON_EXT_ENABLED=1")
    endif()
@@ -61,7 +61,7 @@ index de78a38a56..ed0dde3527 100644
  else()
    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
  endif()
-@@ -305,5 +329,44 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
+@@ -305,6 +329,45 @@
    link_libraries(stdc++fs)
  endif()
  
@@ -106,7 +106,8 @@ index de78a38a56..ed0dde3527 100644
 +endif()
  ################################################################################
  # Python module
-@@ -337,11 +387,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
+ ################################################################################
+@@ -337,10 +400,20 @@
      target_compile_definitions(nanobind-static PUBLIC Py_LIMITED_API=0x030C0000)
    endif()
    target_link_libraries(nanobind-static PRIVATE Python3::Module)
@@ -120,15 +121,14 @@ index de78a38a56..ed0dde3527 100644
    foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
      add_subdirectory(third_party/${CODEGEN_BACKEND})
    endforeach()
- 
++
 +  if(TRITON_BUILD_TD)
 +    list(APPEND TRITON_PLUGIN_NAMES "distributed")
 +  endif()
-+
+ 
    if (TRITON_BUILD_PROTON)
      add_subdirectory(third_party/proton)
-   endif()
-@@ -523,6 +583,12 @@ endif()
+@@ -523,6 +596,12 @@
  find_package(Threads REQUIRED)
  
  add_subdirectory(third_party/f2reduce)
@@ -142,18 +142,18 @@ index de78a38a56..ed0dde3527 100644
  add_subdirectory(test)
  
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index 2a37535d35..d5a4159dcb 100644
+index 2a37535d3..d5a4159dc 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
 @@ -1,10 +1,35 @@
  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
- 
++
 +include_directories(
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/include
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +  )
-+
+ 
  add_executable(triton-opt triton-opt.cpp)
  
  target_compile_options(triton-opt PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
@@ -181,7 +181,7 @@ index 2a37535d35..d5a4159dcb 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -26,6 +51,25 @@ target_compile_options(triton-reduce PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
+@@ -26,6 +51,25 @@
  
  target_link_libraries(triton-reduce PRIVATE
    ${triton_libs}
@@ -207,7 +207,7 @@ index 2a37535d35..d5a4159dcb 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -46,6 +90,25 @@ add_executable(triton-lsp triton-lsp.cpp)
+@@ -46,6 +90,25 @@
  target_compile_options(triton-lsp PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
  target_link_libraries(triton-lsp PRIVATE
    ${triton_libs}
@@ -233,7 +233,7 @@ index 2a37535d35..d5a4159dcb 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -81,6 +144,26 @@ add_executable(triton-tensor-layout triton-tensor-layout.cpp)
+@@ -81,6 +144,26 @@
  target_compile_options(triton-tensor-layout PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
  target_link_libraries(triton-tensor-layout PRIVATE
    ${triton_libs}
@@ -261,10 +261,10 @@ index 2a37535d35..d5a4159dcb 100644
    TritonTestDialect
    TritonTestProton
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index e36459e331..1fcf983d5f 100644
+index e36459e33..fc0096e0d 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,35 @@
+@@ -1,6 +1,36 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -275,6 +275,7 @@ index e36459e331..1fcf983d5f 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
++#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/UBOverflowChecker.h"
 +#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
@@ -300,7 +301,7 @@ index e36459e331..1fcf983d5f 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -93,6 +122,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -93,6 +123,19 @@
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -320,7 +321,7 @@ index e36459e331..1fcf983d5f 100644
    mlir::triton::registerSetMinimumSharedMemoryPass();
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
-@@ -150,6 +192,21 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -150,6 +193,22 @@
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -331,6 +332,7 @@ index e36459e331..1fcf983d5f 100644
 +  mlir::triton::registerAddControlFlowConditionPasses();
 +  mlir::triton::registerAddMultiBufferOuterScopePasses();
 +  mlir::triton::registerAddMultiBufferInnerScopePasses();
++  mlir::triton::registerUBOverflowCheckerPasses();
 +  mlir::triton::registerRemoveSsbufAttrPasses();
 +  mlir::triton::registerAnalyzeDataFlowPasses();
 +  mlir::triton::registerComputeBlockOptPasses();
@@ -342,7 +344,7 @@ index e36459e331..1fcf983d5f 100644
    // Register plugin passes and dialects.
    for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
      plugin.registerPasses();
-@@ -162,10 +219,17 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -162,10 +221,17 @@
        mlir::triton::gpu::TritonGPUDialect,
        mlir::triton::instrument::TritonInstrumentDialect,
        mlir::math::MathDialect, mlir::arith::ArithDialect, mlir::scf::SCFDialect,
@@ -363,7 +365,7 @@ index e36459e331..1fcf983d5f 100644
 +      mlir::func::FuncDialect>();
  }
 diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
-index 2d2570771a..91ed8b79ae 100644
+index 2d2570771..91ed8b79a 100644
 --- a/bin/triton-opt.cpp
 +++ b/bin/triton-opt.cpp
 @@ -1,4 +1,5 @@
@@ -372,7 +374,7 @@ index 2d2570771a..91ed8b79ae 100644
  
  #include "mlir/Tools/mlir-opt/MlirOptMain.h"
  
-@@ -6,6 +7,9 @@ int main(int argc, char **argv) {
+@@ -6,6 +7,9 @@
    mlir::DialectRegistry registry;
    registerTritonDialects(registry);
  
@@ -383,10 +385,10 @@ index 2d2570771a..91ed8b79ae 100644
        argc, argv, "Triton (GPU) optimizer driver\n", registry));
  }
 diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-index 5a76a1d7b1..4114df60ce 100644
+index 5a76a1d7b..4114df60c 100644
 --- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 +++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-@@ -130,8 +130,9 @@ def TT_InputPrecisionAttr : I32EnumAttr<
+@@ -130,8 +130,9 @@
        I32EnumAttrCase<"TF32", 0, "tf32">,
        I32EnumAttrCase<"TF32x3", 1, "tf32x3">,
        I32EnumAttrCase<"IEEE", 2, "ieee">,
@@ -399,10 +401,10 @@ index 5a76a1d7b1..4114df60ce 100644
    let cppNamespace = "::mlir::triton";
  }
 diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
-index 3b0158c2da..602dd1b352 100644
+index f6d96fefc..25d9042eb 100644
 --- a/include/triton/Dialect/Triton/IR/TritonOps.td
 +++ b/include/triton/Dialect/Triton/IR/TritonOps.td
-@@ -81,6 +81,11 @@ def TT_BitcastOp : TT_Op<"bitcast", [Elementwise,
+@@ -81,6 +81,11 @@
      let hasVerifier = 1;
  }
  
@@ -414,7 +416,7 @@ index 3b0158c2da..602dd1b352 100644
  def TT_FpToFpOp : TT_Op<"fp_to_fp", [Elementwise,
                                       SameOperandsAndResultShape,
                                       SameOperandsAndResultEncoding,
-@@ -215,7 +220,6 @@ def TT_LoadOp : TT_Op<"load", [
+@@ -215,7 +220,6 @@
    SameLoadStoreOperandsAndResultShape,
    SameLoadStoreOperandsAndResultEncoding,
    AttrSizedOperandSegments,
@@ -422,7 +424,7 @@ index 3b0158c2da..602dd1b352 100644
    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
    DeclareOpInterfaceMethods<InferTypeOpInterface>,
    TypesMatchWith<"result matches ptr type", "ptr", "result", "getPointeeType($_self)">,
-@@ -224,13 +228,16 @@ def TT_LoadOp : TT_Op<"load", [
+@@ -224,13 +228,16 @@
    TypesMatchWith<"other matches ptr type", "ptr", "other", "getPointeeType($_self)",
                   "($_op.getOperands().size() <= 2) || std::equal_to<>()">
  ]> {
@@ -441,7 +443,7 @@ index 3b0158c2da..602dd1b352 100644
        DefaultValuedAttr<TT_CacheModifierAttr, "::mlir::triton::CacheModifier::NONE">:$cache,
        DefaultValuedAttr<TT_EvictionPolicyAttr, "::mlir::triton::EvictionPolicy::NORMAL">:$evict,
        DefaultValuedAttr<BoolAttr, "false">:$isVolatile
-@@ -242,8 +249,20 @@ def TT_LoadOp : TT_Op<"load", [
+@@ -242,8 +249,20 @@
          // A tensor of pointers or a pointer to a scalar
          OpBuilder<(ins "Value":$ptr, "triton::CacheModifier":$cache,
                         "triton::EvictionPolicy":$evict, "bool":$isVolatile)>,
@@ -462,7 +464,7 @@ index 3b0158c2da..602dd1b352 100644
                         "triton::EvictionPolicy":$evict, "bool":$isVolatile)>
      ];
  
-@@ -275,27 +294,32 @@ def TT_LoadOp : TT_Op<"load", [
+@@ -275,27 +294,32 @@
  def TT_StoreOp : TT_Op<"store", [
    SameLoadStoreOperandsShape,
    SameLoadStoreOperandsEncoding,
@@ -501,7 +503,7 @@ index 3b0158c2da..602dd1b352 100644
      ];
  
      // Specify cacheModifier and evictionPolicy explicitly, instead of leaving
-@@ -1380,4 +1404,76 @@ def TT_DescriptorScatterOp : TT_Op<"descriptor_scatter", [TT_DescriptorStoreLike
+@@ -1380,4 +1404,76 @@
  }
  
  
@@ -579,22 +581,22 @@ index 3b0158c2da..602dd1b352 100644
 +
  #endif // Triton_OPS
 diff --git a/include/triton/Dialect/Triton/IR/Types.h b/include/triton/Dialect/Triton/IR/Types.h
-index 63eceeac48..205e473b58 100644
+index 63eceeac4..205e473b5 100644
 --- a/include/triton/Dialect/Triton/IR/Types.h
 +++ b/include/triton/Dialect/Triton/IR/Types.h
-@@ -20,6 +20,10 @@ namespace mlir {
+@@ -19,6 +19,10 @@
+ namespace mlir {
  
  namespace triton {
- 
++
 +bool isTensorPointerType(Type type);
 +
 +Type getElementTypeOfTensorPointerType(Type type);
-+
+ 
  unsigned getPointeeBitWidth(Type type);
  
- Type getPointeeType(Type type);
 diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
-index 1308d96d12..f03b8cca97 100644
+index a9c32bde0..2545ff779 100644
 --- a/lib/Dialect/Triton/IR/Ops.cpp
 +++ b/lib/Dialect/Triton/IR/Ops.cpp
 @@ -4,6 +4,7 @@
@@ -605,7 +607,7 @@ index 1308d96d12..f03b8cca97 100644
  #include "mlir/Interfaces/FunctionImplementation.h"
  #include "mlir/Interfaces/FunctionInterfaces.h"
  #include "mlir/Support/LLVM.h"
-@@ -42,22 +43,47 @@ namespace triton {
+@@ -42,22 +43,47 @@
  //-- LoadOp --
  void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                     CacheModifier cache, EvictionPolicy evict, bool isVolatile) {
@@ -629,14 +631,18 @@ index 1308d96d12..f03b8cca97 100644
                     bool isVolatile) {
 -  LoadOp::build(builder, state, ptr, mask, /*other=*/{}, cache, evict,
 -                isVolatile);
-+  LoadOp::build(builder, state, ptr, mask, /*other=*/{},
-+                /*boundaryCheck=*/ArrayRef<int32_t>{},
-+                /*padding=*/std::nullopt, cache, evict, isVolatile);
- }
- 
+-}
+-
 -Value LoadOp::getPredicateOperand() { return getMask(); }
 -
 -void LoadOp::setPredicateOperand(Value pred) { getMaskMutable().assign(pred); }
+-
+-Type LoadOp::getPredicateOperandTypeLike() { return getPtr().getType(); }
++  LoadOp::build(builder, state, ptr, mask, /*other=*/{},
++                /*boundaryCheck=*/ArrayRef<int32_t>{},
++                /*padding=*/std::nullopt, cache, evict, isVolatile);
++}
++
 +void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
 +                   Value mask, Value other, CacheModifier cache,
 +                   EvictionPolicy evict, bool isVolatile) {
@@ -644,8 +650,7 @@ index 1308d96d12..f03b8cca97 100644
 +                /*boundaryCheck=*/ArrayRef<int32_t>{},
 +                /*padding=*/std::nullopt, cache, evict, isVolatile);
 +}
- 
--Type LoadOp::getPredicateOperandTypeLike() { return getPtr().getType(); }
++
 +void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
 +                   Value mask, Value other, ArrayRef<int32_t> boundaryCheck,
 +                   std::optional<PaddingOption> padding, CacheModifier cache,
@@ -661,7 +666,7 @@ index 1308d96d12..f03b8cca97 100644
  
  // load(ptr, splat(1), ...)        -> load(ptr, ...)
  // load(ptr, splat(0), other, ...) -> other
-@@ -83,6 +109,7 @@ struct CanonicalizeMaskedLoadPattern : public OpRewritePattern<LoadOp> {
+@@ -83,6 +109,7 @@
        // mask = splat(1)
        rewriter.replaceOpWithNewOp<LoadOp>(
            loadOp, loadOp.getType(), loadOp.getPtr(), Value(), Value(),
@@ -669,26 +674,29 @@ index 1308d96d12..f03b8cca97 100644
            loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile());
      } else {
        // mask = splat(0)
-@@ -106,14 +133,24 @@ void LoadOp::getCanonicalizationPatterns(RewritePatternSet &results,
+@@ -106,14 +133,24 @@
  //-- StoreOp --
  void StoreOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                      Value value, CacheModifier cache, EvictionPolicy evict) {
 -  return StoreOp::build(builder, state, ptr, value, /*mask=*/{}, cache, evict);
-+  return StoreOp::build(builder, state, ptr, value, /*mask=*/{},
-+                        /*boundaryCheck=*/{}, cache, evict);
- }
- 
+-}
+-
 -Value StoreOp::getPredicateOperand() { return getMask(); }
 -
 -void StoreOp::setPredicateOperand(Value pred) { getMaskMutable().assign(pred); }
+-
+-Type StoreOp::getPredicateOperandTypeLike() { return getPtr().getType(); }
++  return StoreOp::build(builder, state, ptr, value, /*mask=*/{},
++                        /*boundaryCheck=*/{}, cache, evict);
++}
++
 +void StoreOp::build(OpBuilder &builder, OperationState &state, Value ptr,
 +                    Value value, Value mask, CacheModifier cache,
 +                    EvictionPolicy evict) {
 +  return StoreOp::build(builder, state, ptr, value, mask, /*boundaryCheck=*/{},
 +                        cache, evict);
 +}
- 
--Type StoreOp::getPredicateOperandTypeLike() { return getPtr().getType(); }
++
 +void StoreOp::build(OpBuilder &builder, OperationState &state, Value ptr,
 +                    Value value, ArrayRef<int32_t> boundaryCheck,
 +                    CacheModifier cache, EvictionPolicy evict) {
@@ -699,10 +707,11 @@ index 1308d96d12..f03b8cca97 100644
  
  // store(ptr, value, splat(1), ...) -> store(ptr, value, ...)
  // store(ptr, value, splat(0), ...) -> [none]
-@@ -148,6 +185,35 @@ struct CanonicalizeMaskedStorePattern : public OpRewritePattern<StoreOp> {
+@@ -147,6 +184,35 @@
+     return success();
    }
  };
- 
++
 +OpFoldResult AdvanceOp::fold(FoldAdaptor adaptor) {
 +  // advance(ptr, 0, 0) -> ptr
 +  SmallVector<OpFoldResult> rawOffsets = getOffsets();
@@ -731,15 +740,14 @@ index 1308d96d12..f03b8cca97 100644
 +  return build(builder, state, result, base, shape, strides, offsets,
 +               builder.getDenseI32ArrayAttr(order));
 +}
-+
+ 
  Value AtomicRMWOp::getPredicateOperand() { return getMask(); }
  
- void AtomicRMWOp::setPredicateOperand(Value pred) {
 diff --git a/lib/Dialect/Triton/IR/Traits.cpp b/lib/Dialect/Triton/IR/Traits.cpp
-index 4d1d460c12..862eb7f0db 100644
+index 4d1d460c1..862eb7f0d 100644
 --- a/lib/Dialect/Triton/IR/Traits.cpp
 +++ b/lib/Dialect/Triton/IR/Traits.cpp
-@@ -89,10 +89,11 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
+@@ -89,10 +89,11 @@
          return op->emitError("Maximum allowed number of elements is ")
                 << maxTensorNumElements << ", but " << *op
                 << " has more than that";
@@ -755,7 +763,7 @@ index 4d1d460c12..862eb7f0db 100644
      }
    }
    for (auto opType : op->getResultTypes()) {
-@@ -104,10 +105,11 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
+@@ -104,10 +105,11 @@
          return op->emitError("Maximum allowed number of elements is ")
                 << maxTensorNumElements << ", but " << *op
                 << " has more than that";
@@ -772,10 +780,10 @@ index 4d1d460c12..862eb7f0db 100644
    }
    return success();
 diff --git a/lib/Dialect/Triton/IR/Types.cpp b/lib/Dialect/Triton/IR/Types.cpp
-index e514631f10..b936f04a53 100644
+index e514631f1..b936f04a5 100644
 --- a/lib/Dialect/Triton/IR/Types.cpp
 +++ b/lib/Dialect/Triton/IR/Types.cpp
-@@ -139,6 +139,19 @@ Type getI1SameShape(Type type) {
+@@ -139,6 +139,19 @@
    return i1Type;
  }
  
@@ -796,10 +804,10 @@ index e514631f10..b936f04a53 100644
    if (auto tensorTy = dyn_cast<RankedTensorType>(type)) {
      // Tensor of pointers
 diff --git a/lib/Dialect/TritonInstrument/IR/Utility.cpp b/lib/Dialect/TritonInstrument/IR/Utility.cpp
-index 5c110385f6..7c9ce43913 100644
+index 5c110385f..7c9ce4391 100644
 --- a/lib/Dialect/TritonInstrument/IR/Utility.cpp
 +++ b/lib/Dialect/TritonInstrument/IR/Utility.cpp
-@@ -377,8 +377,7 @@ Operation *createStoreScratchMemory(OpBuilder &b, Location loc, Value alloc,
+@@ -377,8 +377,7 @@
    }
    auto ptrTensor = createPointerTensor(b, loc, alloc, tensorType);
    return StoreOp::create(b, loc, ptrTensor, tensor, storeMask,
@@ -810,10 +818,10 @@ index 5c110385f6..7c9ce43913 100644
  
  Value createLoadScratchMemory(OpBuilder &b, Location loc, Value alloc,
 diff --git a/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp b/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp
-index 8f4f8d367e..d1d98f4151 100644
+index 8f4f8d367..d1d98f415 100644
 --- a/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp
 +++ b/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp
-@@ -1046,8 +1046,7 @@ static Value loadScratchStrided2D(PatternRewriter &rewriter, Location loc,
+@@ -1046,8 +1046,7 @@
  static Operation *storeScratchStrided2D(PatternRewriter &rewriter, Location loc,
                                          Value base, Value tensor,
                                          RankedTensorType tensorTy,
@@ -823,7 +831,7 @@ index 8f4f8d367e..d1d98f4151 100644
    auto storageTy = getScratchStorageType(tensorTy);
    auto ptrTensor = createPointerTensorStrided2D(rewriter, loc, base, storageTy,
                                                  stride0, stride1);
-@@ -1055,8 +1054,7 @@ static Operation *storeScratchStrided2D(PatternRewriter &rewriter, Location loc,
+@@ -1055,8 +1054,7 @@
    if (isFloatLike(tensorTy))
      stored = embedToInt(rewriter, loc, tensor);
    return tt::StoreOp::create(rewriter, loc, ptrTensor, stored, Value(),
@@ -833,7 +841,7 @@ index 8f4f8d367e..d1d98f4151 100644
  }
  
  std::optional<MmaOperandSource>
-@@ -2588,7 +2586,7 @@ struct TMEMStorePattern : public OpRewritePattern<ttng::TMEMStoreOp> {
+@@ -2588,7 +2586,7 @@
        stored = arith::SelectOp::create(rewriter, loc, pred, stored, previous);
      }
      if (!storeScratchStrided2D(rewriter, loc, info->ptr, stored, storageTy,
@@ -842,7 +850,7 @@ index 8f4f8d367e..d1d98f4151 100644
        return emitFpSanCodegenError(op.getOperation());
  
      createGlobalScratchBarrier(rewriter, loc,
-@@ -2639,8 +2637,7 @@ struct TMEMCopyPattern : public OpRewritePattern<ttng::TMEMCopyOp> {
+@@ -2639,8 +2637,7 @@
              .getResult();
      if (!storeScratchStrided2D(rewriter, loc, info->ptr, srcReg, srcRegTy,
                                 /*stride0=*/1,
@@ -853,10 +861,10 @@ index 8f4f8d367e..d1d98f4151 100644
  
      createGlobalScratchBarrier(rewriter, loc,
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 16cf6fb90f..0a9ca3b513 100644
+index 16cf6fb90..0a9ca3b51 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
-@@ -311,6 +311,7 @@ void init_triton_ir(py::module_ &m) {
+@@ -311,6 +311,7 @@
        .value("TF32", InputPrecision::TF32)
        .value("TF32x3", InputPrecision::TF32x3)
        .value("IEEE", InputPrecision::IEEE)
@@ -864,7 +872,7 @@ index 16cf6fb90f..0a9ca3b513 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
-@@ -1862,6 +1863,18 @@ void init_triton_ir(py::module_ &m) {
+@@ -1862,6 +1863,18 @@
                                                  llvm::StringRef(message));
               self.create<AssertOp>(condition, messageAttr);
             })
@@ -884,10 +892,10 @@ index 16cf6fb90f..0a9ca3b513 100644
             [](TritonOpBuilder &self, Value &condition) {
               self.create<LLVM::AssumeOp>(condition);
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
-index 83c80535b0..508f133ea1 100644
+index 83c80535b..508f133ea 100644
 --- a/python/triton/_utils.py
 +++ b/python/triton/_utils.py
-@@ -65,8 +65,9 @@ def validate_block_shape(shape: List[int]):
+@@ -65,8 +65,9 @@
      for i, d in enumerate(shape):
          if not isinstance(d, int):
              raise TypeError(f"Shape element {i} must have type `constexpr[int]`, got `constexpr[{type(d)}]")
@@ -900,10 +908,10 @@ index 83c80535b0..508f133ea1 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index adc4dcdd64..9032de8704 100644
+index adc4dcdd6..7e7ca0a81 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
-@@ -11,8 +11,16 @@ from dataclasses import dataclass
+@@ -11,8 +11,16 @@
  from types import ModuleType
  from typing import Any, Callable, Dict, Optional, Tuple, Type, Union, Iterable, List
  
@@ -921,18 +929,18 @@ index adc4dcdd64..9032de8704 100644
  from ..language import constexpr, str_to_ty, tensor, tuple as tl_tuple
  from ..language.core import _unwrap_if_constexpr, base_value, base_type
  # ideally we wouldn't need any runtime component
-@@ -21,6 +29,10 @@ from .._utils import apply_with_path, set_iterable_path, is_namedtuple
+@@ -20,6 +28,10 @@
+ from .._utils import apply_with_path, set_iterable_path, is_namedtuple
  
  from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedLanguageConstruct)
- 
++
 +# Central registry for all 'with' statement handlers
 +WITH_DISPATCH = {}
 +WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
-+
+ 
  
  def check_identifier_legality(name, type):
-     pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
-@@ -304,7 +316,14 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -304,7 +316,14 @@
              self.semantic = GluonSemantic(self.builder)
          else:
              from triton.language.semantic import TritonSemantic
@@ -948,13 +956,13 @@ index adc4dcdd64..9032de8704 100644
              self.semantic = TritonSemantic(self.builder)
  
          self.name_loc_as_prefix = None
-@@ -314,6 +333,17 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -314,6 +333,17 @@
          self.begin_col = begin_col
          self.builder.set_loc(file_name, begin_line, begin_col)
          self.builder.options = options
 +
 +        # Set up unified builder interface with methods from specialized builders
-+        compile_mode = "simt" if (hasattr(options, "force_simt_only") and options.force_simt_only) else "simd"
++        compile_mode = "simt" if getattr(options, "compile_mode", "simd") == "simt_only" else "simd"
 +        self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""),
 +                                                             compile_mode=compile_mode)
 +        self.ascend_builder.set_loc(file_name, begin_line, 0)
@@ -966,7 +974,7 @@ index adc4dcdd64..9032de8704 100644
          # dict of functions provided by the backend. Below are the list of possible functions:
          # Convert custom types not natively supported on HW.
          # convert_custom_types(input_tensor, dtype, fp_downcast_rounding=None, _builder=None)
-@@ -459,17 +489,19 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -459,17 +489,19 @@
          self.lscope[name] = value
          self.local_defs[name] = value
  
@@ -992,7 +1000,7 @@ index adc4dcdd64..9032de8704 100644
  
      @contextlib.contextmanager
      def _discovering_loop_carries(self):
-@@ -1121,6 +1153,26 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1121,6 +1153,26 @@
                  return self.visit(node.orelse)
  
      def visit_With(self, node):
@@ -1019,7 +1027,7 @@ index adc4dcdd64..9032de8704 100644
          # Lower `with` statements by constructing context managers and calling their enter/exit hooks
          # Instantiate each context manager with builder injection
          cm_list = []
-@@ -1292,7 +1344,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1292,7 +1344,7 @@
          flatten = False
          warp_specialize = False
          disable_licm = False
@@ -1028,7 +1036,7 @@ index adc4dcdd64..9032de8704 100644
              iterator = IteratorClass(*iter_args, **iter_kwargs)
              # visit iterator arguments
              # note: only `range` iterator is supported now
-@@ -1370,7 +1422,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1370,7 +1422,9 @@
              if warp_specialize:
                  for_op.set_attr("tt.warp_specialize", self.builder.get_unit_attr())
              if disable_licm:
@@ -1039,7 +1047,7 @@ index adc4dcdd64..9032de8704 100644
  
              self.scf_stack.append(node)
              for_op_body = for_op.get_body(0)
-@@ -1488,6 +1542,11 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1488,6 +1542,11 @@
              return self.call_JitFunction(fn, args, kws)
          if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn) or isinstance(
                  fn, ConstexprFunction):
@@ -1051,7 +1059,7 @@ index adc4dcdd64..9032de8704 100644
              extra_kwargs = dict()
  
              sig = getattr(fn, "signature", None)
-@@ -1505,6 +1564,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1505,6 +1564,9 @@
                  # builtin functions return plain tuples for readability
                  if isinstance(ret, tuple):
                      ret = language.tuple(ret)
@@ -1061,7 +1069,7 @@ index adc4dcdd64..9032de8704 100644
                  return ret
              except Exception as e:
                  if knobs.compilation.front_end_debugging:
-@@ -1728,6 +1790,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1728,6 +1790,7 @@
          ttgl.static_print: static_executor(print),
          int: static_executor(int),
          len: static_executor(len),
@@ -1070,10 +1078,10 @@ index adc4dcdd64..9032de8704 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index 5c7088fc34..36f4bb1376 100644
+index 5c7088fc3..281b81af9 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
-@@ -10,6 +10,7 @@ from ..runtime.autotuner import OutOfResources
+@@ -10,6 +10,7 @@
  from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key
  from ..runtime.driver import driver
  from ..tools.disasm import get_sass
@@ -1081,7 +1089,7 @@ index 5c7088fc34..36f4bb1376 100644
  from pathlib import Path
  import re
  import functools
-@@ -324,7 +325,29 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -324,7 +325,25 @@
      if compilation_listener:
          timer.finished_ir_initialization()
      for ext, compile_ir in list(stages.items())[first_stage:]:
@@ -1093,10 +1101,6 @@ index 5c7088fc34..36f4bb1376 100644
 +                stage_name = "ConvertTritonIRToLinalgIR"
 +            elif (ext == "npubin"):
 +                stage_name = "ConvertLinalgIRToBinary"
-+            elif (ext == "bcmlir"):
-+                stage_name = "BytecodeToLinalgIRByBishengirOpt"
-+            elif (ext == "mlirbc"):
-+                stage_name = "LinalgIRToBytecodeByTritonMLIROpt"
 +            else:
 +                stage_name = "MLIRCompile"
 +            if hasattr(e, 'stderr') and e.stderr:
@@ -1112,19 +1116,7 @@ index 5c7088fc34..36f4bb1376 100644
          ir_filename = f"{file_name}.{ext}"
          if fn_override_manager is None:
              # Users can override kernels at scale by setting `ir_override` in autotune config
-@@ -423,8 +446,10 @@ class CompiledKernel:
-         # stores the text of each level of IR that was generated during compilation
-         asm_files = [Path(p) for c, p in metadata_group.items() if not c.endswith(".json")]
-         binary_ext = backend.binary_ext
-+        binary_extensions = getattr(backend, 'binary_extensions', {binary_ext})
-         self.asm = AsmDict({
--            file.suffix[1:]: file.read_bytes() if file.suffix[1:] == binary_ext else file.read_text()
-+            file.suffix[1:]:
-+            file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
-             for file in asm_files
-         })
-         self.metadata_group = metadata_group
-@@ -481,7 +506,7 @@ class CompiledKernel:
+@@ -481,7 +500,7 @@
              knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
@@ -1134,10 +1126,10 @@ index 5c7088fc34..36f4bb1376 100644
          warp_size = driver.active.get_current_target().warp_size
          if self.metadata.num_warps * warp_size > self.n_max_threads:
 diff --git a/python/triton/compiler/errors.py b/python/triton/compiler/errors.py
-index 39e6c4dfb0..c72ca65c24 100644
+index 39e6c4dfb..c72ca65c2 100644
 --- a/python/triton/compiler/errors.py
 +++ b/python/triton/compiler/errors.py
-@@ -49,3 +49,24 @@ class CompileTimeAssertionFailure(CompilationError):
+@@ -49,3 +49,24 @@
  
  class UnsupportedLanguageConstruct(CompilationError):
      pass
@@ -1163,10 +1155,10 @@ index 39e6c4dfb0..c72ca65c24 100644
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
-index dd29febfcf..3a975aa256 100644
+index dd29febfc..3a975aa25 100644
 --- a/python/triton/language/math.py
 +++ b/python/triton/language/math.py
-@@ -21,8 +21,12 @@ def _check_dtype(dtypes: List[str]) -> T:
+@@ -21,8 +21,12 @@
              # concatenate args and kwargs
              all_args = list(args) + list(kwargs.values())
              for arg in [a for a in all_args if isinstance(a, core.tensor)]:
@@ -1181,7 +1173,7 @@ index dd29febfcf..3a975aa256 100644
              return fn(*args, **kwargs)
  
          return check
-@@ -93,7 +97,7 @@ def umulhi(x, y, _semantic=None):
+@@ -93,7 +97,7 @@
  
  @core._tensor_member_fn
  @core.builtin
@@ -1191,10 +1183,10 @@ index dd29febfcf..3a975aa256 100644
  def exp(x, _semantic=None):
      x = _semantic.to_tensor(x)
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 3f48cb3ada..b05485c334 100644
+index 3f48cb3ad..08219ced7 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
-@@ -220,7 +220,7 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -220,7 +220,7 @@
          min_value = self.scalar_constant(min_value, tl.int64)
          cond = self.and_(self.less_equal(ret, max_value), self.greater_equal(ret, min_value))
          msg = f"int{lhs_sca_ty.int_bitwidth} overflow detected for operation {binary_op.__name__}"
@@ -1203,7 +1195,7 @@ index 3f48cb3ada..b05485c334 100644
  
      def add(self, input: TensorTy | numbers.Number, other: TensorTy | numbers.Number,
              sanitize_overflow: bool) -> TensorTy:
-@@ -348,6 +348,9 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -348,6 +348,9 @@
                  raise TypeError("Cannot mod " + scalar_ty.__repr__() + " by " + other_scalar_ty.__repr__() + " "
                                  "because they have different signedness;"
                                  "this is unlikely to result in a useful answer. Cast them to the same signedness.")
@@ -1213,7 +1205,7 @@ index 3f48cb3ada..b05485c334 100644
              if scalar_ty.is_int_signed():
                  return self.tensor(self.builder.create_srem(input.handle, other.handle), input.type)
              else:
-@@ -433,22 +436,61 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -433,22 +436,61 @@
          return self.tensor(self.builder.create_xor(input.handle, other.handle), input.type)
  
      def logical_and(self, input: TensorTy, other: TensorTy) -> TensorTy:
@@ -1281,7 +1273,7 @@ index 3f48cb3ada..b05485c334 100644
          return self.invert(input)
  
      def lshr(self, input: TensorTy, other: TensorTy) -> TensorTy:
-@@ -472,6 +514,9 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -472,6 +514,9 @@
  
      def minus(self, input: TensorTy) -> TensorTy:
          input_sca_ty = input.type.scalar
@@ -1291,7 +1283,7 @@ index 3f48cb3ada..b05485c334 100644
          if input_sca_ty.is_ptr():
              raise ValueError("wrong type argument to unary minus (" + input_sca_ty.__repr__() + ")")
          if input_sca_ty.is_floating():
-@@ -480,8 +525,13 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -480,8 +525,13 @@
          return self.sub(_0, input, True)
  
      def invert(self, input: TensorTy) -> TensorTy:
@@ -1306,7 +1298,7 @@ index 3f48cb3ada..b05485c334 100644
              raise ValueError("wrong type argument to unary invert (" + input_sca_ty.__repr__() + ")")
          _1 = self.tensor(self.builder.get_all_ones_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
          return self.xor_(input, _1)
-@@ -585,8 +635,11 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -585,8 +635,11 @@
          if end <= start:
              raise ValueError("arange's end argument must be greater than the start argument")
          range = end - start
@@ -1320,7 +1312,7 @@ index 3f48cb3ada..b05485c334 100644
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)
-@@ -998,7 +1051,12 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -998,7 +1051,12 @@
          # Check `mask` and `other` arguments
          if mask is None and other is not None:
              raise ValueError("`other` cannot be provided without `mask`")
@@ -1334,32 +1326,31 @@ index 3f48cb3ada..b05485c334 100644
          # For a pointer of scalar, check the type of `mask` and `other`
          if not ptr.type.is_block():
              if mask and mask.type.is_block():
-@@ -1037,13 +1095,19 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1037,13 +1095,17 @@
  
          # Build IR
          if mask is None:
 -            ret = self.tensor(self.builder.create_load(ptr.handle, cache, eviction, is_volatile), dst_ty)
-+            load_handle = self.builder.create_load(ptr.handle, cache, eviction, is_volatile)
-         else:
+-        else:
 -            ret = self.tensor(
 -                self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache,
 -                                                eviction, is_volatile), dst_ty)
++            load_handle = self.builder.create_load(ptr.handle, cache, eviction, is_volatile)
++        else:
 +            load_handle = self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None,
 +                                                          cache, eviction, is_volatile)
-+
-+        if is_bool:
-+            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
 +
 +        ret = self.tensor(load_handle, dst_ty)
 +        # Do not cast back to int1 when is_bool=true. We directly use the int8 tensor given by tl.load
          if is_bool:
 -            ret = self.cast(ret, tl.int1)
++            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
 +            ret.was_bool_to_int8 = True
 +
          return ret
  
      def descriptor_load(self, desc: tl.tensor_descriptor_base, offsets, cache_modifier: str,
-@@ -1827,12 +1891,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1827,12 +1889,17 @@
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  
@@ -1380,10 +1371,10 @@ index 3f48cb3ada..b05485c334 100644
      def assume(self, cond) -> TensorTy:
          return self.tensor(self.builder.create_assume(cond.handle), tl.void)
 diff --git a/python/triton/language/standard.py b/python/triton/language/standard.py
-index 0feb7a1e43..d1c0f2bbd8 100644
+index 0feb7a1e4..d1c0f2bbd 100644
 --- a/python/triton/language/standard.py
 +++ b/python/triton/language/standard.py
-@@ -170,11 +170,17 @@ def _elementwise_max(a, b):
+@@ -170,11 +170,17 @@
      return core.maximum(a, b)
  
  
@@ -1402,7 +1393,7 @@ index 0feb7a1e43..d1c0f2bbd8 100644
      input = core._promote_bfloat16_to_float32(input)
      if return_indices:
          if return_indices_tie_break_left:
-@@ -188,7 +194,10 @@ def max(input, axis=None, return_indices=False, return_indices_tie_break_left=Tr
+@@ -188,7 +194,10 @@
              else:
                  assert input.dtype.is_int(), "Expecting input to be integer type"
                  input = input.to(core.int32)
@@ -1415,13 +1406,14 @@ index 0feb7a1e43..d1c0f2bbd8 100644
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index 19d5a17cd4..e614f0ac86 100644
+index 19d5a17cd..e614f0ac8 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
-@@ -24,6 +24,25 @@ from .._utils import _tuple_create
+@@ -23,6 +23,25 @@
+ from .._utils import _tuple_create
  
  T = TypeVar("T")
- 
++
 +# Import Ascend-specific interpreter builder (with deferred import to avoid circular dependency)
 +_has_ascend_support = False
 +AscendInterpreterBuilder = None
@@ -1440,11 +1432,10 @@ index 19d5a17cd4..e614f0ac86 100644
 +        # Catch other exceptions (like circular import) and log them
 +        _has_ascend_support = False
 +        AscendInterpreterBuilder = None
-+
+ 
  
  @dataclass
- class TensorHandle:
-@@ -110,7 +129,7 @@ class InterpreterOptions:
+@@ -110,7 +129,7 @@
      supported_fp8_dtypes: Tuple[str, ...] = ("fp8e5", "fp8e5b16", "fp8e4nv", "fp8e4b8", "fp8e4b15")
      deprecated_fp8_dot_operand_dtypes: Tuple[str, ...] = ()
      default_dot_input_precision: str = "tf32"
@@ -1453,7 +1444,7 @@ index 19d5a17cd4..e614f0ac86 100644
      max_num_imprecise_acc_default: int = 0
      backend_name: str = "interpreter"
  
-@@ -186,6 +205,8 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
+@@ -186,6 +205,8 @@
      bias_input = input_dtype.exponent_bias
      bias_output = output_dtype.exponent_bias
      exponent = ((input_bin >> input_dtype.fp_mantissa_width) & ((1 << input_exponent_width) - 1)).astype(np.int32)
@@ -1462,7 +1453,7 @@ index 19d5a17cd4..e614f0ac86 100644
      subnormal_index = exponent == 0
      if np.any(subnormal_index):
          # Credit to Phil: phil@openai.com
-@@ -205,8 +226,13 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
+@@ -205,8 +226,13 @@
          significand[subnormal_index] = (significand[subnormal_index] << bit_pos[subnormal_index]) & (
              (1 << input_dtype.fp_mantissa_width) - 1)
      # Prevent overflow and underflow
@@ -1477,7 +1468,7 @@ index 19d5a17cd4..e614f0ac86 100644
      sign_output = sign.astype(output_unint_dtype)
      if input_dtype.primitive_bitwidth > output_dtype.primitive_bitwidth:  # Downcast
          significand_output = (significand >> (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width)) & (
-@@ -234,6 +260,8 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
+@@ -234,6 +260,8 @@
          shift[subnormal_index] = (1 - bias_output) - (exponent[subnormal_index] - bias_input)
          significand_output[subnormal_index] = (significand_output[subnormal_index] >> shift[subnormal_index]) | (
              1 << (output_dtype.fp_mantissa_width - shift[subnormal_index]))
@@ -1486,7 +1477,7 @@ index 19d5a17cd4..e614f0ac86 100644
      output = (sign_output << (output_dtype.primitive_bitwidth - 1)) | (
          exponent_output << output_dtype.fp_mantissa_width) | significand_output
      return output.reshape(input.shape)
-@@ -381,6 +409,8 @@ class InterpreterBuilder:
+@@ -381,6 +409,8 @@
          self.options = InterpreterOptions()
          self.codegen_fns = {}
          self.codegen_fns["convert_custom_types"] = ExtraFunctions._convert_custom_types
@@ -1495,7 +1486,7 @@ index 19d5a17cd4..e614f0ac86 100644
          self.codegen_fns["min_dot_size"] = lambda lhsType, rhsType: (1, 1, 1)
  
      def set_grid_idx(self, x, y, z):
-@@ -845,6 +875,9 @@ class InterpreterBuilder:
+@@ -845,6 +875,9 @@
          # Interpreter's device_assert function has a different format than Triton's device_assert
          assert condition, f"{message}"
  
@@ -1505,7 +1496,7 @@ index 19d5a17cd4..e614f0ac86 100644
      def create_assume(self, condition):
          assert condition, "Assume failed"
  
-@@ -1291,6 +1324,11 @@ def _patch_lang(fn):
+@@ -1291,6 +1324,11 @@
          _patch_lang_tensor(lang.tensor, scope)
          _patch_lang_core(lang, scope)
      _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
@@ -1517,7 +1508,7 @@ index 19d5a17cd4..e614f0ac86 100644
      return scope
  
  
-@@ -1331,6 +1369,16 @@ def _implicit_cvt(arg):
+@@ -1331,6 +1369,16 @@
      return arg
  
  
@@ -1534,7 +1525,7 @@ index 19d5a17cd4..e614f0ac86 100644
  def _unwrap_tensor(t):
      if isinstance(t, triton.runtime.jit.TensorWrapper):
          return t.base
-@@ -1441,11 +1489,14 @@ class GridExecutor:
+@@ -1441,11 +1489,14 @@
              grid = grid + (1, ) * (3 - len(grid))
              interpreter_builder.set_grid_dim(*grid)
              try:
@@ -1555,13 +1546,15 @@ index 19d5a17cd4..e614f0ac86 100644
                  if triton.knobs.compilation.front_end_debugging:
                      raise
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index 3a37f7a81a..cbddb92271 100644
+index 3a37f7a81..6cdd185ee 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
-@@ -400,22 +400,30 @@ def create_function_from_signature(sig, kparams, backend):
+@@ -400,26 +400,39 @@
      assert len(sig.parameters) == len(kparams)
      # Create the function argument list and the dict entries for the return statement
      specialization = []
++    uses_alignment_specialization = False
++    alignment_specialization_name = "__triton_alignment_specialization"
 +    integer_annotation_types = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}
      # signature
      for name, kp in zip(sig.parameters.keys(), kparams):
@@ -1575,8 +1568,9 @@ index 3a37f7a81a..cbddb92271 100644
 +            is_const = kp.is_const
 +            specialize = not kp.do_not_specialize
 +            align = not kp.do_not_specialize_on_alignment
++            effective_align = alignment_specialization_name if align and specialize else "False"
 +            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
-+                   f"{align} and backend.use_alignment_specialization(options))")
++                   f"{effective_align})")
              if kp.annotation_type:
                  if isinstance(kp.annotation_type, str):
                      if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:
@@ -1584,6 +1578,7 @@ index 3a37f7a81a..cbddb92271 100644
                          specialize = False
                  if specialize:
 -                    specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
++                    uses_alignment_specialization = uses_alignment_specialization or align
 +                    if kp.annotation_type in integer_annotation_types:
 +                        # An integer annotation constrains the type of runtime values, but must not discard a
 +                        # constexpr classification already produced by the value specializer (for example, 1).
@@ -1594,11 +1589,30 @@ index 3a37f7a81a..cbddb92271 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
+             else:
++                uses_alignment_specialization = uses_alignment_specialization or (align and specialize)
+                 specialization.append(f"{ret}")
+ 
+     # compute argument string for a given parameter
+@@ -429,9 +442,12 @@
+             return f"*{name}"
+         return name if param.default is inspect.Parameter.empty else f"{name}=default_{name}"
+ 
++    alignment_specialization_init = (f"    {alignment_specialization_name} = "
++                                     "backend.use_alignment_specialization(options)\n"
++                                     if uses_alignment_specialization else "")
+     func_body = f"""
+ def dynamic_func({", ".join(list(map(arg, sig.parameters.items())) + ["**options"])}):
+-    params = {{{', '.join([f"'{name}': {name}" for name in sig.parameters.keys()])}}}
++{alignment_specialization_init}    params = {{{', '.join([f"'{name}': {name}" for name in sig.parameters.keys()])}}}
+     specialization = [{','.join(specialization)}]
+     return params, specialization, options
+ """
 diff --git a/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM/LoadStoreOpToLLVM.cpp b/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM/LoadStoreOpToLLVM.cpp
-index 7c2c3659a9..ac7550906e 100644
+index 7c2c3659a..ac7550906 100644
 --- a/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM/LoadStoreOpToLLVM.cpp
 +++ b/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM/LoadStoreOpToLLVM.cpp
-@@ -412,8 +412,6 @@ struct StoreOpConversion : public ConvertOpToLLVMPattern<triton::StoreOp>,
+@@ -412,8 +412,6 @@
          llMask && vec == 1 ? getScalarizedContiguousRun(ptr) : 1;
  
      auto freeVarMasks = getFreeVariableMasks(ptr.getType());
