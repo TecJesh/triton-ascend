@@ -1,6 +1,12 @@
 ARG CANN_BASE_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:8.5.0-a3-ubuntu22.04-py3.10
 FROM ${CANN_BASE_IMAGE}
 
+# torch-npu is pinned per CANN release: the CANN 8.5.0 line (a3/910b) uses
+# 2.7.1.post8, while CANN 9.1.0 (a5/Ascend 950) uses 2.10.0.post4. requirements.txt
+# is shared by every chip, so the version lives here instead — override at
+# build time with --build-arg TORCH_NPU_VERSION=2.10.0.post4 for the a5 image.
+ARG TORCH_NPU_VERSION=2.7.1.post8
+
 ARG APTMIRROR=http://mirrors.huaweicloud.com
 ARG PIP_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple
 ARG PIP_TRUSTED_HOST=repo.huaweicloud.com
@@ -58,6 +64,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --timeout 300 -r requirements_dev.txt && \
-    python3 -m pip install --timeout 300 -r requirements.txt
+    python3 -m pip install --timeout 300 -r requirements.txt && \
+    python3 -m pip install torch-npu==${TORCH_NPU_VERSION}
 
 WORKDIR /home/triton
