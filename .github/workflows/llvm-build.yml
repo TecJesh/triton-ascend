@@ -51,7 +51,7 @@ jobs:
 
     steps:
     - name: Checkout Repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v5
 
     - name: Config mirrors & install build tools
       if: matrix.config.target-os == 'ubuntu'
@@ -98,7 +98,7 @@ jobs:
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
     - name: Checkout LLVM
-      uses: actions/checkout@v6
+      uses: actions/checkout@v5
       with:
         repository: llvm/llvm-project
         path: llvm-project
@@ -157,22 +157,8 @@ jobs:
         key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}
         restore-keys: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-
 
-    - name: Free disk space on Ubuntu
+    - name: Configure, Build, and Install LLVM (Ubuntu)
       if: matrix.config.target-os == 'ubuntu'
-      run: |
-        df -h
-        echo "Removing large packages"
-        sudo apt-get remove -y 'php.*'
-        sudo apt-get remove -y google-chrome-stable firefox powershell mono-devel
-        sudo apt-get autoremove -y
-        sudo apt-get clean
-        df -h
-        echo "Removing large directories"
-        # deleting 15GB
-        df -h
-
-    - name: Configure, Build, Test, and Install LLVM (Ubuntu and macOS x64)
-      if: matrix.config.arch == 'x64' && (matrix.config.target-os == 'ubuntu' || matrix.config.target-os == 'macos')
       shell: bash
       env:
         LLVM_INSTALL_DIR: ${{ env.llvm_install_dir }}
