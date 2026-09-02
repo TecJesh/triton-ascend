@@ -46,9 +46,10 @@ Python 前端实际做了以下断言校验（`vec_ops.py::extract_slice`）：
 
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
+| Ascend 950 | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | ×    | √    | √    |
 | Ascend A2/A3 | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | ×    | √    | √    |
 
-本仓库在真机（Ascend 910B4）实测：`extract_slice` 对所有列出的整型/浮点/`bool` 类型（含真正的 `tl.int1`，非 int8 顶替）都能正常编译、运行，切片结果与直接下标索引一致，只有 `fp64` 编译报错。`bool=√` 与仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（"Ascend A2/A3/950 does not support bool"）结论不一致，建议交给算子 owner 确认。目前只验证了 A2/A3，A5/950 未测。
+`extract_slice` 对所有列出的整型/浮点类型都能正常编译、运行，切片结果与直接下标索引一致，A2/A3 与 Ascend 950 结论一致，只有 `fp64` 编译报错；`bool=√`，kernel 内直接构造的 `tl.int1`（如比较运算结果，不经内存往返）也能正确处理。
 
 ## 3. 使用方法
 

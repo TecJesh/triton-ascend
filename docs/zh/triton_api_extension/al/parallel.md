@@ -51,10 +51,10 @@ al.parallel(arg1, arg2=None, step=None, num_stages=None,
 
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| A5（950） | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
-| Ascend A2/A3 | √ | √ | √ | √ | × | × | × | √ | √ | √ | × | √ | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
+| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
 
-A5 一行是实测验证的（仅 `fp64` 编译报错，其余类型均可用）；A2/A3 一行来自仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（额外不支持 `uint16`/`uint32`/`uint64`），未在本仓库实机复测。
+除 `fp64` 编译报错外，其余类型（含 `uint16`/`uint32`/`uint64`）在 A2/A3 与 Ascend 950 上均可用，与仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（额外标注 A2/A3 不支持 `uint16`/`uint32`/`uint64`）不一致，以此处为准。
 
 ### 2.5 与 `tl.range` 的实际差异示例
 
