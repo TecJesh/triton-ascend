@@ -2229,6 +2229,9 @@ class AutoTilingTuner(Autotuner):
                             self._compile_failed_configs.append(config)
             except Exception as e:
                 # ignore exception from __exit__() of AsyncCompileMode
+                import traceback
+                exc = e
+                exc_stack = traceback.format_exc()
                 triton.runtime._async_compile.active_mode.set(None)
         else:
             for config, fn in kernels_call.items():
@@ -2325,9 +2328,6 @@ class AutoTilingTuner(Autotuner):
                 )
                 if isinstance(res, tuple):
                     res = res[0]
-                packed_metadata = getattr(res, "packed_metadata", None)
-                if isinstance(packed_metadata, dict):
-                    kernel_call.target_kernel_name = packed_metadata.get("kernel_name")
             except Exception as e:
                 try:
                     self.post_hook(full_nargs, exception=e)
