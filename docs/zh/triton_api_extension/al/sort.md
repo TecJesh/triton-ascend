@@ -34,8 +34,11 @@ al.sort(ptr, dim=-1, descending=False, _semantic=None)
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 |--- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
 | A5 | √    | √     | √     | ×     | ×      | ×      | ×      | √     | √    | √    | ×    | √    | ×    |
+| Ascend A2/A3 | √    | √     | ×     | ×     | ×      | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
 另外 `float8e4nv`、`float8e5` 这两个类型也在 `allowed_types` 里。不在 `allowed_types` 中的 dtype 会直接 `raise TypeError`。
+
+> A2/A3 一行为本仓库在真机（Ascend 910B4）实测数据：`int32`、`int64` 虽在源码 `allowed_types` 集合里（Python 侧不报错），但 NPUIR 侧不支持，编译直接失败（`MLIRCompilationError`）；`bool` 不支持（`tl.int1` 编译报错），与仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（"Ascend does not support bool, fp64, int32, int64, uint8"）结论一致。
 
 ## 3. 使用方法
 

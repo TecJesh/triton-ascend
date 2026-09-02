@@ -47,7 +47,14 @@ al.parallel(arg1, arg2=None, step=None, num_stages=None,
 
 ### 2.4 dtype 支持
 
-`al.parallel` 本身不携带 dtype 信息（循环边界只能是 int/constexpr），循环体内部数据的 dtype 支持与 `tl.range` 完全一致（在 A5 上验证：`int8/16/32/64`、`uint8/16/32/64`、`fp16/fp32`、`bf16`、`bool` 均可用，仅 `fp64` 编译报错）。
+`al.parallel` 本身不携带 dtype 信息（循环边界只能是 int/constexpr），循环体内部数据的 dtype 支持与 `tl.range` 完全一致。
+
+| | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
+| --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
+| A5（950） | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
+| Ascend A2/A3 | √ | √ | √ | √ | × | × | × | √ | √ | √ | × | √ | √ |
+
+A5 一行是实测验证的（仅 `fp64` 编译报错，其余类型均可用）；A2/A3 一行来自仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（额外不支持 `uint16`/`uint32`/`uint64`），未在本仓库实机复测。
 
 ### 2.5 与 `tl.range` 的实际差异示例
 
