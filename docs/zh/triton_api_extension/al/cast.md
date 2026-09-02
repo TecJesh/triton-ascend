@@ -38,7 +38,7 @@
 
 ### 2.2 特殊限制说明
 
-- **fp8 / fp64 只在 910_95（对应 A5/950 系列）架构上支持转换**：源码里有一条硬性检查——
+- **fp8 / fp64 只在 910_95（对应 Ascend 950 系列）架构上支持转换**：源码里有一条硬性检查——
   ```python
   if not is_compile_on_910_95(_semantic.builder.options.arch):
       if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
