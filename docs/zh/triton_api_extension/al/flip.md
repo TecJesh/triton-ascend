@@ -35,6 +35,9 @@ al.flip(x, dim=-1, _semantic=None, _generator=None)
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
 |A5| √    | √     | √     | √     | ×      | ×      | √      | √     | √    | √    | ×    | √    | √    |
+|Ascend A2/A3| √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | ×    | √    | ×    |
+
+> A2/A3 一行为本仓库在真机（Ascend 910B4）实测数据：`fp64` 编译报错；`bool` 不支持（`tl.int1` 编译报错，`MLIRCompilationError`）；其余类型（含 `uint16`/`uint32`/`uint64`）均编译、运行、结果正确。A2/A3 的 `uint16`/`uint32` 与 A5 的 `uint16=×`/`uint32=×` 不一致，建议交给算子 owner 确认这两种架构是否真的有差异。A5 一行未在本仓库复测，维持原有数据。
 
 ## 3. 使用方法
 

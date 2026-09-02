@@ -34,6 +34,14 @@ al.get_element(
 
 1. `indice` 的长度必须与 `src` 张量的维度数（rank）相同，否则会抛出 `ValueError("Indice's rank must be equal to src tensor's rank")`（这是一个普通异常，不是 assert，可以被正常捕获）。
 
+### 2.3 DataType 支持
+
+| | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
+| --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
+| Ascend A2/A3 | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | ×    | √    | √    |
+
+本仓库在真机（Ascend 910B4）实测：`get_element` 对所有列出的整型/浮点/`bool` 类型（含真正的 `tl.int1`，非 int8 顶替）都能正常编译、运行，取出的元素值与直接下标索引一致，只有 `fp64` 编译报错。`bool=√` 与仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（"Ascend A2/A3/950 does not support bool"）结论不一致，建议交给算子 owner 确认。目前只验证了 A2/A3，A5/950 未测。
+
 ## 3. 使用方法
 
 以下示例实现了 `get_element` 的调用：
