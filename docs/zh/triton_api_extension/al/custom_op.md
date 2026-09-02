@@ -108,7 +108,7 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
   </tr>
 </table>
 
-注册类可以定义 `__init__`，用于校验 `al.custom` 的调用参数。定义后，构造函数签名必须接收调用时传入的全部参数；如果调用使用 `out`，构造函数也应包含 `out` 参数。省略 `__init__` 时，注册类只保存静态配置。
+注册类可以定义 `__init__`，用于校验 `al.custom` 的调用参数。定义后，构造函数签名必须接收调用时传入的全部参数；如果调用使用 `out`，构造函数应包含带默认值的 `out` 参数，例如 `out=None`。省略 `__init__` 时，注册类只保存静态配置。
 
 ### 2.4 CustomOp 与 CustomMacro
 
@@ -191,13 +191,13 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
     <td>set_pipe</td>
     <td>al.PIPE</td>
     <td>条件必需</td>
-    <td>设置信号的一侧流水线；使用 WAIT 或 SET 时应与 wait_pipe 一起配置</td>
+    <td>设置信号的一侧流水线；使用 WAIT 或 SET 时必须与 wait_pipe 一起配置</td>
   </tr>
   <tr>
     <td>wait_pipe</td>
     <td>al.PIPE</td>
     <td>条件必需</td>
-    <td>等待信号的一侧流水线；使用 WAIT 或 SET 时应与 set_pipe 一起配置</td>
+    <td>等待信号的一侧流水线；使用 WAIT 或 SET 时必须与 set_pipe 一起配置</td>
   </tr>
   <tr>
     <td>sync</td>
@@ -225,18 +225,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 
 ### 2.11 EVENT_ID
 
-`al.EVENT_ID` 用于固定 `SyncEventSlot.event` 的事件编号。
-
-| 枚举值 | 编号 |
-| --- | ---: |
-| `al.EVENT_ID.EVENT_ID0` | 0 |
-| `al.EVENT_ID.EVENT_ID1` | 1 |
-| `al.EVENT_ID.EVENT_ID2` | 2 |
-| `al.EVENT_ID.EVENT_ID3` | 3 |
-| `al.EVENT_ID.EVENT_ID4` | 4 |
-| `al.EVENT_ID.EVENT_ID5` | 5 |
-| `al.EVENT_ID.EVENT_ID6` | 6 |
-| `al.EVENT_ID.EVENT_ID7` | 7 |
+`al.EVENT_ID` 提供 `EVENT_ID0` 至 `EVENT_ID7` 八个枚举值，用于固定 `SyncEventSlot.event` 的事件编号。
 
 省略 `event` 不等同于显式指定 `al.EVENT_ID.EVENT_ID0`。具体 event ID 与流水线组合应和设备侧同步实现保持一致。
 
@@ -249,7 +238,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 - 用户注册的 CustomOp 或 CustomMacro 必须提供 `symbol` 和 `bitcode`；`bitcode` 路径必须存在，且应包含与 `symbol` 对应的设备侧实现。
 - `al.custom` 应在 `@triton.jit` 函数中调用，`name` 必须与已经注册的名称一致。
 - `iterator_types` 中的元素应为 `al.IteratorType`，顺序和含义必须与设备侧实现的逻辑循环一致。
-- `sync_event_slots` 只支持 CustomMacro。使用 `al.SYNC_HINT.WAIT` 或 `al.SYNC_HINT.SET` 时，应同时提供 `set_pipe` 和 `wait_pipe`；同步声明必须与设备侧实现一致。
+- `sync_event_slots` 只支持 CustomMacro。使用 `al.SYNC_HINT.WAIT` 或 `al.SYNC_HINT.SET` 时，必须同时提供 `set_pipe` 和 `wait_pipe`；同步声明必须与设备侧实现一致。
 - `al.EVENT_ID` 只用于 `al.SyncEventSlot.event`。
 
 ## 4. 用例示例
