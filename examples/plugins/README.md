@@ -1,6 +1,7 @@
 # Triton TTIR and TTGIR Out of Tree Plugin Passes
 
 ## Overview
+
 Triton’s existing pass pipelines are assembled in the various extended compiler.py files that live in Triton’s backends. Currently when we want to insert
 passes either for downstream optimizations, custom ops, or instrumentation it is required for the compiler.py file itself to be modified and all of Triton to be
 recompiled.
@@ -16,10 +17,12 @@ Custom passes/ops are implemented as a shared library that is loaded by Triton a
 long as the libtriton.so is linked to the plugin and the Triton include passes are used to build the plugin.
 
 ## Example 1: Developing a custom pass and running triton-opt to inspect the modified IR
+
 ``` bash
 export LLVM_BUILD_SHARED_LIBS=1;  make dev-install-llvm
 TRITON_PASS_PLUGIN_PATH=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so triton-opt -tritongpu-plugin test/Plugins/test-plugin.mlir
 ```
+
 ``` MLIR
 module attributes {"ttg.num-warps" = 4 : i32, ttg.target = "cuda:80"} {
   tt.func @foo() {
@@ -29,6 +32,7 @@ module attributes {"ttg.num-warps" = 4 : i32, ttg.target = "cuda:80"} {
 ```
 
 After the out of tree pass runs, becomes:
+
 ``` MLIR
 module attributes {"ttg.num-warps" = 4 : i32, ttg.target = "cuda:80"} {
   tt.func @bar() {
@@ -36,10 +40,13 @@ module attributes {"ttg.num-warps" = 4 : i32, ttg.target = "cuda:80"} {
   }
 }
 ```
+
 Function "foo" is renamed to "bar" by the out of tree pass.
 
 ## Example 2: Inserting a new pass into the compiler pipeline
+
 Let's take the following toy kernel example:
+
 ``` python
 import torch
 import os
@@ -68,9 +75,11 @@ if __name__ == '__main__':
 ```
 
 Running as is will produce the expected output of printing the TTGIR of the kernel:
+
 ``` bash
 python test.py
 ```
+
 ``` MLIR
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 4 : i32, ttg.target = "cuda:90", "ttg.threads-per-warp" = 32 : i32} {
   tt.func public @kernel() attributes {noinline = false} {
@@ -199,7 +208,7 @@ This functionality can be toggled on and off by just commenting out this line in
 knobs.runtime.add_stages_inspection_hook = inspect_stages_hook
 without needing any core compiler changes or rebuilding Triton.
 
-## Example 3: Inserting a new pass into the compiler pipeline at an arbitrary point.
+## Example 3: Inserting a new pass into the compiler pipeline at an arbitrary point
 
 Example 2 added a new pass to the end of the ttgir "stage". However the plugin pass's location is arbitrary and can be dynamically inserted anywhere in the pipeline. Replacing the inspect_stages_hook function from example 2 instead with:
 
@@ -223,6 +232,7 @@ def inspect_stages_hook(self=None, stages=None, options=None, language=None, cap
     stages["ttir"] = make_lambda(module.make_ttir)
     return get_key(), get_hash()
 ```
+
 directs the new pass's placement based on other surrounding passes. Knowing which passes are in the pipeline a priori can be challenging, therefore in the next example we show how to dump and inspect the entire pipeline that is run for a particular kernel to allow for precise placement of specialized out of tree passes even if the upstream pass pipeline structure changes.
 
 ## Example 4: Fully customizing the compiler pipeline with pass and op insertions at arbitrary locations

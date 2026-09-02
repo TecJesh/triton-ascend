@@ -73,16 +73,16 @@ flowchart TD
 
 1. Batch run (build TritonAscend with `-DTRITON_BUILD_UT=ON`):
 
-```bash
-lit -v build/cmake.*/third_party/ascend/unittest --filter=LLVM20Compat
-```
+    ```bash
+    lit -v build/cmake.*/third_party/ascend/unittest --filter=LLVM20Compat
+    ```
 
 2. Single-file debug:
 
-```bash
-triton-opt third_party/ascend/unittest/Conversion/LLVM20Compat/OpCompat/arith_divsi.mlir \
-  | FileCheck third_party/ascend/unittest/Conversion/LLVM20Compat/OpCompat/arith_divsi.mlir
-```
+    ```bash
+    triton-opt third_party/ascend/unittest/Conversion/LLVM20Compat/OpCompat/arith_divsi.mlir \
+      | FileCheck third_party/ascend/unittest/Conversion/LLVM20Compat/OpCompat/arith_divsi.mlir
+    ```
 
 ## Ops that need compatibility patches
 
