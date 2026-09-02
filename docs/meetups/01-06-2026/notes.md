@@ -1,16 +1,18 @@
-# Agenda:
+# Agenda
+
 * Update on triton-shared (Haishan Zhu and Nhat Nguyen, Meta)
 * Update on the plugin system infrastructure - what's upstream today and roadmap  (Corbin Robeck and Puyan Lotfi, Meta)
 * Standing up a repo with useful plugins (testing, deployment, etc). (Simon Waters, kernelize.ai)
 
-# Minutes:
+# Minutes
+
 * Update on triton-shared (Haishan Zhu and Nhat Nguyen, Meta)
   * Haishan and Nhat work on MTIA's Triton compiler.
   * triton-shared is a subset of dialects and compiler passes that perform architecture agnostic lowerings of Triton dialects.
   * Microsoft Maya team maintained it but is stopping now. They're currently working on passing the reins to the Meta MTIA team.
   * Contributors were confused with Microsoft's post, but rest assured, triton-shared is still alive and will continue to thrive with Meta's maintenance and hosting (update coming soon to triton-language slack channel).
   * Questions? Reach out to Haishan or Nhat on slack.
-  * Landed enhancments over the last year
+  * Landed enhancements over the last year
     * Standardized handling of Triton pointer type
       * Lower pointer types and ops to MLIR's PtrDialect
     * Widened pointer analysis coverage
@@ -42,7 +44,7 @@
     * Enforces layerings
     * Full featured: dialects, custom operations
     * Don’t need to work on a fork!  Don’t need to recompile compiler to experiment.
-    * See https://github.com/triton-lang/triton/tree/main/plugins for examples.
+    * See https://github.com/triton-lang/triton/tree/main/examples/plugins for examples.
   * Concept: overrideable pipeline
     1. Hooks: embedded in backend compiler.py (allows Python to insert the plugin to compiler) Overrides passes in add_stages table.
     2. Native code: invoked by hook.
@@ -102,4 +104,5 @@
     * A> Puyan, Meta, At least one use case we’ve thought of.
 
 # Minutes
+
 * Recording link [here](https://youtu.be/JnFFwBB6Dhk)
