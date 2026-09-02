@@ -42,6 +42,14 @@ Python 前端实际做了以下断言校验（`vec_ops.py::extract_slice`）：
 2. `offsets`、`sizes`、`strides` 的长度必须与 `ful` 的维度数相同；
 3. `sizes` 中的元素需要大于等于 1，`strides` 中的元素需要大于等于 0（注意 `strides` 允许为 0）。
 
+### 2.3 DataType 支持
+
+| | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
+| --- | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
+| Ascend A2/A3 | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | ×    | √    | √    |
+
+本仓库在真机（Ascend 910B4）实测：`extract_slice` 对所有列出的整型/浮点/`bool` 类型（含真正的 `tl.int1`，非 int8 顶替）都能正常编译、运行，切片结果与直接下标索引一致，只有 `fp64` 编译报错。`bool=√` 与仓库自带的 `docs/zh/python-api/_ascend_constraints.py`（"Ascend A2/A3/950 does not support bool"）结论不一致，建议交给算子 owner 确认。目前只验证了 A2/A3，A5/950 未测。
+
 ## 3. 使用方法
 
 以下示例实现了从计算结果中提取前 32 个元素：
