@@ -1788,7 +1788,22 @@ diff --git a/mlir/lib/IR/AsmPrinter.cpp b/mlir/lib/IR/AsmPrinter.cpp
 index 81455699421c..0c2e4c462753 100644
 --- a/mlir/lib/IR/AsmPrinter.cpp
 +++ b/mlir/lib/IR/AsmPrinter.cpp
-@@ -3769,9 +3769,17 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
+@@ -3771,6 +3771,14 @@ void OperationPrinter::printCustomOrGenericOp(Operation *op) {
+ void OperationPrinter::printCustomOrGenericOp(Operation *op) {
+   // If requested, always print the generic form.
+   if (!printerFlags.shouldPrintGenericOpForm()) {
++    // LLVM 20 print compatibility (LLVM20Compat OpCompat/ub_misc.mlir
++    // guard): ub.poison is always printed in the generic form, matching
++    // the LLVM 20 baseline; its `value` property is elided in
++    // printGenericOp below.
++    if (op->getName().getStringRef() == "ub.poison") {
++      printGenericOp(op, /*printOpName=*/true);
++      return;
++    }
+     // Check to see if this is a known operation. If so, use the registered
+     // custom printer hook.
+     if (auto opInfo = op->getRegisteredInfo()) {
+@@ -3816,9 +3822,24 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
  
    // Print the properties.
    if (Attribute prop = op->getPropertiesAsAttribute()) {
@@ -1798,8 +1813,15 @@ index 81455699421c..0c2e4c462753 100644
 +    auto dict = cast<DictionaryAttr>(prop);
 +    SmallVector<NamedAttribute> filtered;
 +    for (NamedAttribute attr : dict) {
-+      if (attr.getName() != "op_bundle_sizes")
-+        filtered.push_back(attr);
++      if (attr.getName() == "op_bundle_sizes")
++        continue;
++      // LLVM 20 print compatibility (LLVM20Compat OpCompat/ub_misc.mlir
++      // guard): elide the `value` property of ub.poison; LLVM 20 does not
++      // print it and the old NPU-IR parser would reject the attribute.
++      if (op->getName().getStringRef() == "ub.poison" &&
++          attr.getName() == "value")
++        continue;
++      filtered.push_back(attr);
 +    }
 +    if (!filtered.empty()) {
 +      os << " <";
@@ -1822,3 +1844,21 @@ index 90f32896e818..855410ae2580 100644
    // Print the body if this is not an external function.
    Region &body = op->getRegion(0);
    if (!body.empty()) {
+diff --git a/mlir/lib/Tools/mlir-opt/MlirOptMain.cpp b/mlir/lib/Tools/mlir-opt/MlirOptMain.cpp
+index 8b49258e135d..dd6d2b06cd2f 100644
+--- a/mlir/lib/Tools/mlir-opt/MlirOptMain.cpp
++++ b/mlir/lib/Tools/mlir-opt/MlirOptMain.cpp
+@@ -79,8 +79,12 @@ MlirOptMainConfigCLOptions() {
+     static cl::opt<bool, /*ExternalStorage=*/true> allowUnregisteredDialects(
+         "allow-unregistered-dialect",
+         cl::desc("Allow operation with no registered dialects"),
+-        cl::location(allowUnregisteredDialectsFlag), cl::init(false));
++        // LLVM 20 text: bare `triton-opt <file>` (LLVM20Compat harness)
++        // must tolerate unregistered ops (e.g. `ub.poison`, the ub
++        // dialect is not linked into triton-opt); matches the RUN-line
++        // `-allow-unregistered-dialect` flag.
++        cl::location(allowUnregisteredDialectsFlag), cl::init(true));
+ 
+     static cl::opt<bool, /*ExternalStorage=*/true> dumpPassPipeline(
+         "dump-pass-pipeline", cl::desc("Print the pipeline that will be run"),
+         cl::location(dumpPassPipelineFlag), cl::init(false));
