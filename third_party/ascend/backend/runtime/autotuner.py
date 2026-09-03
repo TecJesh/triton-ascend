@@ -2328,6 +2328,16 @@ class AutoTilingTuner(Autotuner):
                 )
                 if isinstance(res, tuple):
                     res = res[0]
+                # Prefer object.__getattribute__ over getattr: FutureKernel.__getattr__
+                # eagerly calls result() under AsyncCompileMode and can raise outside
+                # the per-config handler. Real CompiledKernel keeps packed_metadata
+                # as an instance attribute; FutureKernel does not.
+                try:
+                    packed_metadata = object.__getattribute__(res, "packed_metadata")
+                except AttributeError:
+                    packed_metadata = None
+                if isinstance(packed_metadata, dict):
+                    kernel_call.target_kernel_name = packed_metadata.get("kernel_name")
             except Exception as e:
                 try:
                     self.post_hook(full_nargs, exception=e)

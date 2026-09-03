@@ -1653,14 +1653,7 @@ def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_internal_valu
     assert internal_hint["grid_num_tiles"] == 99
 
 
-def _assign_target_kernel_name_like_batch_bench(kernel_call, compiled_kernel):
-    # Mirror AutoTilingTuner._batch_bench: name is taken from the compiled
-    # result after run returns, not inside _make_kernel_call (FutureKernel-safe).
-    if hasattr(compiled_kernel, "packed_metadata"):
-        kernel_call.target_kernel_name = compiled_kernel.packed_metadata.get("kernel_name")
-
-
-def test_batch_bench_extracts_name_from_jit_run():
+def test_make_kernel_call_extracts_name_from_jit_run():
     namespace = _load_autotuner_methods("_make_kernel_call")
     _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
 
@@ -1677,14 +1670,13 @@ def test_batch_bench_extracts_name_from_jit_run():
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")
-    kernel_call = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
-    compiled_kernel = kernel_call(warmup=False)
-    _assign_target_kernel_name_like_batch_bench(kernel_call, compiled_kernel)
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
 
-    assert kernel_call.target_kernel_name == "test_kernel_jit"
+    assert kernel_call_closure.target_kernel_name == "test_kernel_jit"
 
 
-def test_batch_bench_extracts_name_from_libentry_tuple():
+def test_make_kernel_call_extracts_name_from_libentry_tuple():
     namespace = _load_autotuner_methods("_make_kernel_call")
     _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
 
@@ -1704,8 +1696,7 @@ def test_batch_bench_extracts_name_from_libentry_tuple():
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")
-    kernel_call = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
-    compiled_kernel = kernel_call(warmup=False)
-    _assign_target_kernel_name_like_batch_bench(kernel_call, compiled_kernel)
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
 
-    assert kernel_call.target_kernel_name == "test_kernel_libentry"
+    assert kernel_call_closure.target_kernel_name == "test_kernel_libentry"
