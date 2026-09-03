@@ -53,15 +53,13 @@ import triton.backends.ascend.runtime  # noqa: F401
 
 @triton.autotune(
     configs=[
-        triton.Config({'STRIDE0': 0}, num_warps=4),   # bad: zero-stride checked axis
+        triton.Config({'STRIDE0': 0}, num_warps=4),  # bad: zero-stride checked axis
         triton.Config({'STRIDE0': 64}, num_warps=4),  # good: row-major stride
     ],
     key=[],
 )
 @triton.jit
-def boundary_kernel(in_ptr, out_ptr, M, N,
-                    STRIDE0: tl.constexpr,
-                    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def boundary_kernel(in_ptr, out_ptr, M, N, STRIDE0: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
     bptr = tl.make_block_ptr(
         base=in_ptr,
         shape=(M, N),
@@ -92,7 +90,7 @@ def test_autotune_drops_failing_config():
 
     # Before the fix this call raises
     # RuntimeError("No valid triton configs. NoneType: None"); see docstring.
-    boundary_kernel[(1,)](x, out, M, N, BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N)
+    boundary_kernel[(1, )](x, out, M, N, BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N)
     torch.npu.synchronize()
 
     # The surviving config (STRIDE0=64) copies the block unchanged.
