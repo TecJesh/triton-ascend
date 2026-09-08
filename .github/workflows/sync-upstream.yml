@@ -53,6 +53,10 @@ on:
         description: 'Skip end-to-end tests'
         required: false
         default: 'false'
+      skip_llvm20compat:
+        description: 'Skip LLVM 2.0 compatibility checks (default true)'
+        required: false
+        default: 'true'
       enable_triton_report:
         description: 'Enable triton-report MCP server setup'
         required: false
@@ -236,6 +240,21 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           echo "claude: $(command -v claude || echo '<not found>')"
 
+      # ── Cached llvm-project source: skip the huge network clone ──────────
+      # Restores the whole repo (full clone, history included) from the
+      # Actions cache. Keyed on the target commit: a primary-key hit means
+      # the commit itself is already in the restored repo — the clone step
+      # below turns into a local checkout, zero network. Fallback keys reuse
+      # the most recent cached clone for other commits: full history is
+      # local, so the missing objects come from a tiny incremental fetch.
+      - name: Cache llvm-project source
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-project
+          key: ${{ runner.os }}-${{ runner.arch }}-llvm-project-src-${{ inputs.llvm_commit || 'default' }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-llvm-project-src-
+
       # ── Clone llvm-project to ~ for IR patch generation ──────────────────
       - name: Clone llvm-project
         shell: bash
@@ -284,9 +303,20 @@ jobs:
           # (workflow_dispatch input llvm_commit; empty on schedule — keep
           # the cloned default HEAD).
           if [ -n "${LLVM_TARGET_COMMIT:-}" ]; then
-            echo "Fetching requested LLVM commit: $LLVM_TARGET_COMMIT"
-            retry git fetch origin "$LLVM_TARGET_COMMIT"
-            git checkout "$LLVM_TARGET_COMMIT"
+            # Cache hit: the commit is already in the restored repo — use
+            # it directly, zero network.
+            if git cat-file -e "${LLVM_TARGET_COMMIT}^{commit}" 2>/dev/null; then
+              echo "LLVM commit already present (cache hit): $LLVM_TARGET_COMMIT"
+            else
+              echo "Fetching requested LLVM commit: $LLVM_TARGET_COMMIT"
+              retry git fetch origin "$LLVM_TARGET_COMMIT"
+            fi
+            # -f: the restored tree may carry leftover changes from the run
+            # that saved the cache (applied patches, build artifacts) — a
+            # plain checkout would refuse with "local changes would be
+            # overwritten". ta-kickoff re-fetches/resets the pin itself, so
+            # discarding here is safe.
+            git checkout -f "$LLVM_TARGET_COMMIT"
             echo "Checked out LLVM commit: $(git rev-parse HEAD)"
           fi
           echo "llvm-project ready at ~/llvm-project ($(git rev-parse --short HEAD))"
@@ -312,11 +342,13 @@ jobs:
           # Optional skip flags (configure via workflow_dispatch inputs).
           # Default everywhere: 'false' = do NOT skip baseline LLVM / build /
           # e2e tests. The `|| 'false'` fallbacks matter for schedule
-          # triggers, where inputs.* is the empty string.
+          # triggers, where inputs.* is the empty string. SKIP_LLVM20COMPAT is
+          # the exception: it defaults to 'true' (skip) unless set otherwise.
           TA_PROGRESSIVE_MERGE: "${{ github.event.inputs.progressive_merge }}"
           SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm || 'false' }}
           SKIP_BUILD: ${{ inputs.skip_build || 'false' }}
           SKIP_E2E_TEST: ${{ inputs.skip_e2e_test || 'false' }}
+          SKIP_LLVM20COMPAT: ${{ inputs.skip_llvm20compat || 'true' }}
           # Push branch + open PR when everything passes.
           PUSH_TO_GITHUB: "true"
           GITHUB_REPO: TecJesh/triton-ascend
@@ -335,11 +367,11 @@ jobs:
           AI_BACKEND: claude
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
-          ANTHROPIC_MODEL: dsv4
-          ANTHROPIC_DEFAULT_OPUS_MODEL: dsv4
-          ANTHROPIC_DEFAULT_SONNET_MODEL: dsv4
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: dsv4
-          CLAUDE_CODE_SUBAGENT_MODEL: dsv4
+          ANTHROPIC_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-flash
+          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-v4-flash
           CLAUDE_CODE_EFFORT_LEVEL: max
           AUTO_STASH: "true"
           # Build parity with integration-tests-ascend.yml. build_test.py does
