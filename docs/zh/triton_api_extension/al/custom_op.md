@@ -229,7 +229,18 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 
 省略 `event` 不等同于显式指定 `al.EVENT_ID.EVENT_ID0`。具体 event ID 与流水线组合应和设备侧同步实现保持一致。
 
-## 3. 约束说明
+## 3. 昇腾平台数据类型支持
+
+CustomOp 和 CustomMacro 没有适用于所有设备实现的统一数据类型支持清单，支持的张量元素类型取决于已注册的设备函数及目标平台。
+
+| 项目 | 支持说明 |
+| --- | --- |
+| 输入 | 各输入的类型必须分别匹配设备函数的参数要求。 |
+| 输出 | 各 `out` 占位张量的类型必须匹配设备函数的对应输出；返回张量与其对应 `out` 保持相同类型。 |
+
+下方示例是配置和调用片段，不构成各数据类型的支持或执行验证。
+
+## 4. 约束说明
 
 - `@al.register_custom_op` 必须装饰类，注册名称不能重复。
 - `core` 和 `pipe` 必须配置，且分别使用 `al.CORE` 和 `al.PIPE` 枚举值。
@@ -241,9 +252,9 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 - `sync_event_slots` 只支持 CustomMacro。使用 `al.SYNC_HINT.WAIT` 或 `al.SYNC_HINT.SET` 时，必须同时提供 `set_pipe` 和 `wait_pipe`；同步声明必须与设备侧实现一致。
 - `al.EVENT_ID` 只用于 `al.SyncEventSlot.event`。
 
-## 4. 用例示例
+## 5. 用例示例
 
-### 4.1 普通 CustomOp
+### 5.1 普通 CustomOp
 
 以下是注册配置和 Kernel 调用片段，使用前需要将 `BITCODE_PATH` 替换为已经存在且包含对应 `symbol` 的 bitcode 文件路径。
 
@@ -269,7 +280,7 @@ result = al.custom("my_custom_op", x, out=y)
 
 注册类没有显式配置 `name`，因此使用类名 `my_custom_op` 作为注册名称。单个 `PIPE_V` 表示这是普通 CustomOp。
 
-### 4.2 带同步槽的 CustomMacro
+### 5.2 带同步槽的 CustomMacro
 
 CustomMacro 与普通 CustomOp 使用相同的装饰器和调用接口，区别在于 `pipe` 包含两个流水线。
 
@@ -302,7 +313,7 @@ result = al.custom("my_custom_macro_sync_op", x, out=y)
 
 `pipe` 中的 `PIPE_MTE2` 和 `PIPE_V` 分别表示输入、输出流水线。同步槽描述设备侧实现内部实际使用的同步流水线，不要求和 CustomMacro 的输入、输出流水线相同；其中 `WAIT` 表示设备侧实现内部执行等待，并固定使用 `EVENT_ID1`。
 
-## 5. 编译输出结果
+## 6. 编译输出结果
 
 下面是与配置对应的关键 IR 字段摘录。
 
