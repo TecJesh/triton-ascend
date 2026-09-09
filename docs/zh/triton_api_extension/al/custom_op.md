@@ -45,11 +45,15 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
     <td>out</td>
     <td>tl.tensor / tl.tuple / tuple / list</td>
     <td>否</td>
-    <td>输出占位值。一个 out 返回一个同类型张量，多个 out 返回 tl.tuple；省略时无返回值</td>
+    <td>输出占位值</td>
   </tr>
 </table>
 
-### 2.3 注册类配置
+### 2.3 返回值
+
+提供一个输出占位张量时，返回与其类型相同的 `tl.tensor`；提供多个时，返回 `tl.tuple`，其中各张量按顺序与对应的 `out` 保持相同类型；省略 `out` 时，返回 `None`。
+
+### 2.4 注册类配置
 
 <table>
   <tr>
@@ -110,7 +114,7 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
 
 注册类可以定义 `__init__`，用于校验 `al.custom` 的调用参数。定义后，构造函数签名必须接收调用时传入的全部参数；如果调用使用 `out`，构造函数应包含带默认值的 `out` 参数，例如 `out=None`。省略 `__init__` 时，注册类只保存静态配置。
 
-### 2.4 CustomOp 与 CustomMacro
+### 2.5 CustomOp 与 CustomMacro
 
 | 形式 | pipe 配置 | 生成的关键 IR | sync_event_slots |
 | --- | --- | --- | --- |
@@ -119,7 +123,7 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
 
 CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 `hivm.pipe_out`。
 
-### 2.5 CORE
+### 2.6 CORE
 
 `al.CORE` 用于配置操作涉及的核类型，生成 `hivm.tcore_type` 属性。
 
@@ -130,7 +134,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 | `al.CORE.CUBE_OR_VECTOR` | 可涉及 Cube 或 Vector 核的类型标识 |
 | `al.CORE.CUBE_AND_VECTOR` | 同时涉及 Cube 和 Vector 核的类型标识 |
 
-### 2.6 MODE
+### 2.7 MODE
 
 `al.MODE` 用于配置非纯 Cube 操作的执行模式，生成 `hivm.vf_mode` 属性。
 
@@ -140,7 +144,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 | `al.MODE.SIMT` | SIMT（单指令多线程）模式 |
 | `al.MODE.MIX` | 混合模式 |
 
-### 2.7 PIPE
+### 2.8 PIPE
 
 `al.PIPE` 用于标识操作或同步涉及的流水线。它只提供流水线信息。
 
@@ -157,7 +161,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 
 表中列出的是典型用途，实际配置必须与设备侧实现保持一致。
 
-### 2.8 IteratorType
+### 2.9 IteratorType
 
 `iterator_types` 是可选配置，用于说明设备侧实现中各逻辑循环维度的作用。列表顺序应与逻辑循环顺序一致，其长度不一定等于输出张量的维数。省略该字段时，当前前端不会生成 `iterator_types` 属性，也不会自动补成 `Parallel`。
 
@@ -176,7 +180,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 | `al.IteratorType.Cumulative` | 累积维度 |
 | `al.IteratorType.Opaque` | 不按上述通用类型解释的维度 |
 
-### 2.9 SyncEventSlot
+### 2.10 SyncEventSlot
 
 当两条流水线之间存在先后依赖时，设置信号的一侧通知任务已经完成，等待信号的一侧等待同一个信号，避免后续任务过早继续执行。`al.SyncEventSlot` 用于描述 CustomMacro 设备侧实现中的一组此类同步关系，只能用于两条流水线的 CustomMacro。
 
@@ -213,7 +217,7 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
   </tr>
 </table>
 
-### 2.10 SYNC_HINT
+### 2.11 SYNC_HINT
 
 `al.SYNC_HINT` 告诉编译器设备侧实现已经承担哪一侧的同步动作。
 
@@ -223,24 +227,13 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 | `al.SYNC_HINT.SET` | 内部设置信号 | 在 CustomMacro 后补充匹配的等待 |
 | `al.SYNC_HINT.INTERNAL` | 内部只使用事件号 | 不在边界补充设置或等待 |
 
-### 2.11 EVENT_ID
+### 2.12 EVENT_ID
 
 `al.EVENT_ID` 提供 `EVENT_ID0` 至 `EVENT_ID7` 八个枚举值，用于固定 `SyncEventSlot.event` 的事件编号。
 
 省略 `event` 不等同于显式指定 `al.EVENT_ID.EVENT_ID0`。具体 event ID 与流水线组合应和设备侧同步实现保持一致。
 
-## 3. 昇腾平台数据类型支持
-
-下表描述 CustomOp 和 CustomMacro 框架前端对张量元素类型的支持情况，不代表具体设备函数的执行能力。
-
-| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-
-实际调用时，各输入和 `out` 占位张量的类型须分别匹配设备函数的对应参数和输出；返回张量与其对应 `out` 保持相同类型。
-
-## 4. 约束说明
+## 3. 约束说明
 
 - `@al.register_custom_op` 必须装饰类，注册名称不能重复。
 - `core` 和 `pipe` 必须配置，且分别使用 `al.CORE` 和 `al.PIPE` 枚举值。
@@ -252,11 +245,11 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 - `sync_event_slots` 只支持 CustomMacro。使用 `al.SYNC_HINT.WAIT` 或 `al.SYNC_HINT.SET` 时，必须同时提供 `set_pipe` 和 `wait_pipe`；同步声明必须与设备侧实现一致。
 - `al.EVENT_ID` 只用于 `al.SyncEventSlot.event`。
 
-## 5. 用例示例
+## 4. 用例示例
 
-### 5.1 普通 CustomOp
+### 4.1 普通 CustomOp
 
-以下是注册配置和 Kernel 调用片段，使用前需要将 `BITCODE_PATH` 替换为已经存在且包含对应 `symbol` 的 bitcode 文件路径。
+以下是注册配置和 Kernel 调用片段。
 
 ```python
 import triton.language.extra.cann.extension as al
@@ -280,9 +273,11 @@ result = al.custom("my_custom_op", x, out=y)
 
 注册类没有显式配置 `name`，因此使用类名 `my_custom_op` 作为注册名称。单个 `PIPE_V` 表示这是普通 CustomOp。
 
-### 5.2 带同步槽的 CustomMacro
+### 4.2 带同步槽的 CustomMacro
 
 CustomMacro 与普通 CustomOp 使用相同的装饰器和调用接口，区别在于 `pipe` 包含两个流水线。
+
+以下是注册配置和 Kernel 调用片段。
 
 ```python
 import triton.language.extra.cann.extension as al
@@ -313,7 +308,7 @@ result = al.custom("my_custom_macro_sync_op", x, out=y)
 
 `pipe` 中的 `PIPE_MTE2` 和 `PIPE_V` 分别表示输入、输出流水线。同步槽描述设备侧实现内部实际使用的同步流水线，不要求和 CustomMacro 的输入、输出流水线相同；其中 `WAIT` 表示设备侧实现内部执行等待，并固定使用 `EVENT_ID1`。
 
-## 6. 编译输出结果
+## 5. 编译输出结果
 
 下面是与配置对应的关键 IR 字段摘录。
 
