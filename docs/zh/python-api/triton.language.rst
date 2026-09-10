@@ -111,6 +111,35 @@ Math Ops
     sqrt_rn
     umulhi
 
+Logical Ops
+-----------
+
+.. autosummary::
+    :nosignatures:
+
+    and
+    or
+    xor
+    not
+    logical_and
+    logical_or
+    invert
+    lshift
+    rshift
+
+Comparison Ops
+--------------
+
+.. autosummary::
+    :nosignatures:
+
+    gt
+    ge
+    lt
+    le
+    eq
+    ne
+
 Reduction Ops
 -------------
 
