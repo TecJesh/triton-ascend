@@ -8,11 +8,27 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
 
 ## 2. 接口说明
 
-<table>
-  <tr>
-    <td>Python<br>def register_custom_op(op)<br><br>def custom(name: str, *args, **kwargs)<br><br>class SyncEventSlot:<br>    def __init__(<br>        self,<br>        set_pipe=None,<br>        wait_pipe=None,<br>        sync=None,<br>        event=None<br>    )</td>
-  </tr>
-</table>
+接口签名片段：
+
+```python
+def register_custom_op(op):
+    ...
+
+
+def custom(name: str, *args, **kwargs):
+    ...
+
+
+class SyncEventSlot:
+    def __init__(
+        self,
+        set_pipe=None,
+        wait_pipe=None,
+        sync=None,
+        event=None
+    ):
+        ...
+```
 
 ### 2.1 使用流程
 
@@ -22,32 +38,11 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
 
 ### 2.2 al.custom 入参
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>name</td>
-    <td>str</td>
-    <td>是</td>
-    <td>已经通过 @al.register_custom_op 注册的 CustomOp 或 CustomMacro 名称</td>
-  </tr>
-  <tr>
-    <td>*args / **kwargs</td>
-    <td>-</td>
-    <td>按操作定义</td>
-    <td>传给设备侧实现的输入；注册类定义 __init__ 时，调用参数必须与其签名一致，否则按实际调用顺序传入</td>
-  </tr>
-  <tr>
-    <td>out</td>
-    <td>tl.tensor / tl.tuple / tuple / list</td>
-    <td>否</td>
-    <td>输出占位值</td>
-  </tr>
-</table>
+| 参数名 | 类型 | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `name` | `str` | 是 | 已经通过 `@al.register_custom_op` 注册的 CustomOp 或 CustomMacro 名称 |
+| `*args` / `**kwargs` | - | 按操作定义 | 传给设备侧实现的输入；注册类定义 `__init__` 时，调用参数必须与其签名一致，否则按实际调用顺序传入 |
+| `out` | `tl.tensor` / `tl.tuple` / `tuple` / `list` | 否 | 输出占位值 |
 
 ### 2.3 返回值
 
@@ -55,62 +50,16 @@ Python 层没有相互独立的 `CustomOp` 和 `CustomMacro` 类，两者使用�
 
 ### 2.4 注册类配置
 
-<table>
-  <tr>
-    <td>字段</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>name</td>
-    <td>str</td>
-    <td>否</td>
-    <td>注册名称；省略时使用类名</td>
-  </tr>
-  <tr>
-    <td>core</td>
-    <td>al.CORE</td>
-    <td>是</td>
-    <td>操作使用的核类型</td>
-  </tr>
-  <tr>
-    <td>pipe</td>
-    <td>al.PIPE / tuple / list</td>
-    <td>是</td>
-    <td>单个 PIPE 表示 CustomOp；两个 PIPE 依次表示 CustomMacro 的输入、输出流水线</td>
-  </tr>
-  <tr>
-    <td>mode</td>
-    <td>al.MODE</td>
-    <td>条件必需</td>
-    <td>core 不是 al.CORE.CUBE 时必须配置</td>
-  </tr>
-  <tr>
-    <td>symbol</td>
-    <td>str</td>
-    <td>是（用户注册）</td>
-    <td>设备侧实现的函数符号；用户注册的 CustomOp 或 CustomMacro 必须配置</td>
-  </tr>
-  <tr>
-    <td>bitcode</td>
-    <td>str / path</td>
-    <td>是（用户注册）</td>
-    <td>包含设备侧实现的 bitcode 文件路径；用户注册的 CustomOp 或 CustomMacro 必须配置，且文件必须存在</td>
-  </tr>
-  <tr>
-    <td>iterator_types</td>
-    <td>list[al.IteratorType]</td>
-    <td>否</td>
-    <td>按逻辑循环顺序描述各迭代维度的作用</td>
-  </tr>
-  <tr>
-    <td>sync_event_slots</td>
-    <td>list[al.SyncEventSlot] / tuple[al.SyncEventSlot, ...]</td>
-    <td>否</td>
-    <td>CustomMacro 的同步槽列表；普通 CustomOp 不支持</td>
-  </tr>
-</table>
+| 字段 | 类型 | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `name` | `str` | 否 | 注册名称；省略时使用类名 |
+| `core` | `al.CORE` | 是 | 操作使用的核类型 |
+| `pipe` | `al.PIPE` / `tuple` / `list` | 是 | 单个 `PIPE` 表示 CustomOp；两个 `PIPE` 依次表示 CustomMacro 的输入、输出流水线 |
+| `mode` | `al.MODE` | 条件必需 | `core` 不是 `al.CORE.CUBE` 时必须配置 |
+| `symbol` | `str` | 是（用户注册） | 设备侧实现的函数符号；用户注册的 CustomOp 或 CustomMacro 必须配置 |
+| `bitcode` | `str` / `path` | 是（用户注册） | 包含设备侧实现的 bitcode 文件路径；用户注册的 CustomOp 或 CustomMacro 必须配置，且文件必须存在 |
+| `iterator_types` | `list[al.IteratorType]` | 否 | 按逻辑循环顺序描述各迭代维度的作用 |
+| `sync_event_slots` | `list[al.SyncEventSlot]` / `tuple[al.SyncEventSlot, ...]` | 否 | CustomMacro 的同步槽列表；普通 CustomOp 不支持 |
 
 注册类可以定义 `__init__`，用于校验 `al.custom` 的调用参数。定义后，构造函数签名必须接收调用时传入的全部参数；如果调用使用 `out`，构造函数应包含带默认值的 `out` 参数，例如 `out=None`。省略 `__init__` 时，注册类只保存静态配置。
 
@@ -184,38 +133,12 @@ CustomMacro 的第一个 `PIPE` 生成 `hivm.pipe_in`，第二个 `PIPE` 生成 
 
 当两条流水线之间存在先后依赖时，设置信号的一侧通知任务已经完成，等待信号的一侧等待同一个信号，避免后续任务过早继续执行。`al.SyncEventSlot` 用于描述 CustomMacro 设备侧实现中的一组此类同步关系，只能用于两条流水线的 CustomMacro。
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>set_pipe</td>
-    <td>al.PIPE</td>
-    <td>条件必需</td>
-    <td>设置信号的一侧流水线；使用 WAIT 或 SET 时必须与 wait_pipe 一起配置</td>
-  </tr>
-  <tr>
-    <td>wait_pipe</td>
-    <td>al.PIPE</td>
-    <td>条件必需</td>
-    <td>等待信号的一侧流水线；使用 WAIT 或 SET 时必须与 set_pipe 一起配置</td>
-  </tr>
-  <tr>
-    <td>sync</td>
-    <td>al.SYNC_HINT</td>
-    <td>否</td>
-    <td>说明设备侧实现承担的同步动作；省略时默认使用 WAIT，建议显式配置</td>
-  </tr>
-  <tr>
-    <td>event</td>
-    <td>al.EVENT_ID</td>
-    <td>否</td>
-    <td>固定该同步槽使用的 event ID；省略时不指定固定 event ID</td>
-  </tr>
-</table>
+| 参数名 | 类型 | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `set_pipe` | `al.PIPE` | 条件必需 | 设置信号的一侧流水线；使用 `WAIT` 或 `SET` 时必须与 `wait_pipe` 一起配置 |
+| `wait_pipe` | `al.PIPE` | 条件必需 | 等待信号的一侧流水线；使用 `WAIT` 或 `SET` 时必须与 `set_pipe` 一起配置 |
+| `sync` | `al.SYNC_HINT` | 否 | 说明设备侧实现承担的同步动作；省略时默认使用 `WAIT`，建议显式配置 |
+| `event` | `al.EVENT_ID` | 否 | 固定该同步槽使用的 event ID；省略时不指定固定 event ID |
 
 ### 2.11 SYNC_HINT
 
