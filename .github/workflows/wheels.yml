@@ -1,142 +1,146 @@
 name: Wheels
-
 on:
   workflow_dispatch:
-  push:
-    branches: [release/**]
   pull_request:
     paths:
       - .github/workflows/wheels.yml
-      - .github/workflows/build/wheels.Dockerfile
-      - setup.py
-      - pyproject.toml
-      - version.txt
-      - cmake/llvm-hash.txt
-      - cmake/json-version.txt
   schedule:
     - cron: "0 8 * * *"
-
-concurrency:
-  group: wheels-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
 jobs:
 
   Build-Wheels:
-    name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
+    timeout-minutes: 180
     runs-on: ${{ matrix.config.runs_on }}
-    container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
-    timeout-minutes: 360
 
     strategy:
       fail-fast: false
-      # Limit parallelism: wheel builds compile hundreds of C++ files on
-      # memory-constrained workers; too many at once causes OOM kills and
-      # buildkitd/SWR auth timeouts.
-      max-parallel: 6
       matrix:
         config:
-        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
-        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
-        python: ["cp310", "cp311", "cp312", "cp313"]
-        branch:
-        - {ref: 'main', tag: 'main', local: 'dev'}
-        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release'}
+        - {runs_on: ['self-hosted', 'CPU'], arch: 'x86_64'}
+        - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
+
 
     permissions:
       id-token: write
       contents: read
 
+    # The self-hosted x86_64 runner ships a docker CLI (1.52) newer than the
+    # daemon's max API version (1.43), so unpinned docker commands fail with
+    # "client version 1.52 is too new". Pin at the job level so every step
+    # (including cibuildwheel's internal docker invocations) inherits it.
+    env:
+      DOCKER_API_VERSION: "1.43"
+
     steps:
 
-      - name: Check for new commits
-        if: github.event_name == 'push'
-        id: new-commits
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prune stale docker containers
         run: |
-          LAST_SHA=$(gh api \
-            "/repos/${{ github.repository }}/actions/workflows/wheels.yml/runs?branch=${{ github.ref_name }}&status=success&per_page=1" \
-            --jq '.workflow_runs[0].head_sha // empty')
-          if [ "$LAST_SHA" = "${{ github.sha }}" ]; then
-            echo "Current commit already has a successful wheel build. Skipping."
-            echo "has_new_commits=false" >> $GITHUB_OUTPUT
-          else
-            echo "New commits detected. Proceeding with wheel build."
-            echo "has_new_commits=true" >> $GITHUB_OUTPUT
-          fi
+          # If cibuildwheel crashes (or, say, is OOM-killed), it leaves behind a
+          # docker container.  Eventually these consume all the disk space on
+          # this machine.
+          docker container prune -f
 
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          # PR: checkout the PR head, not the matrix.branch ref (main).
-          # push/workflow_dispatch/schedule: use the matrix branch ref.
-          ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
-      - name: Compute build variables
-        id: vars
-        shell: bash
+      # The LATEST_DATE here should be kept in sync with the one in Patch setup.py
+      - id: check-version
+        name: Check latest version
         run: |
-          NUM_PROCS=$(( $(nproc) / 6 ))
-          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          # Hard-cap at 8 to avoid OOM on memory-constrained buildkitd workers.
-          if [ "$NUM_PROCS" -gt 8 ]; then NUM_PROCS=8; fi
-          echo "max_jobs=${NUM_PROCS}" >> $GITHUB_OUTPUT
-          BUILD_DATE=$(date -u +%Y%m%d)
-          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          export PACKAGE_DATE=$(python3 -m pip install --user --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --dry-run triton-nightly== |& grep -oP '(?<=, )[0-9\.]+dev[0-9]+(?=\))' | grep -oP '(?<=dev)[0-9]+')
+          export LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
+          if cmp -s <(echo $PACKAGE_DATE) <(echo $LATEST_DATE); then
+            echo "new_commit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_commit=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Patch setup.py
+        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
+        run: |
+          echo "" >> python/setup.cfg
+          echo "[build_ext]" >> python/setup.cfg
+          echo "base-dir=/project" >> python/setup.cfg
 
       - name: Build wheels
-        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: .github/workflows/build/wheels.Dockerfile
-          build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
-            PYTHON_VERSION=${{ matrix.python }}
-            MAX_JOBS=${{ steps.vars.outputs.max_jobs }}
-            TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
-            BUILD_DATE=${{ steps.vars.outputs.build_date }}
-          outputs: type=local,dest=./wheelhouse
+        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
+        run: |
+          python --version
+          # Make sure cibuildwheel is updated to latest, this will enable latest python builds
+          python3 -m pip install cibuildwheel --upgrade --user
+          # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
+          # of RAM and OOMs while building if we give it the default number of
+          # workers (2 * NUM_CPUs).
+          export CIBW_ENVIRONMENT="MAX_JOBS=4 \
+                  TRITON_EXT_ENABLED=ON \
+                  TRITON_BUILD_WITH_CLANG_LLD=1"
 
-      - uses: actions/upload-artifact@v4
-        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+          # required to build Python 3.14 with cibuildwheel 2.23.3
+          # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
+
+
+          # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
+          # With this install, it gets clang 16.0.6.
+          export CIBW_BEFORE_ALL="dnf install clang lld -y"
+
+          # Skip auditwheel's dependency-bundling pass on libtriton.so. Without
+          # this, every shared library libtriton.so links against is copied into
+          # triton.libs/ and the wheel grows by ~130MB. PyTorch's build script
+          # uses the same flag for the same reason.
+          export CIBW_REPAIR_WHEEL_COMMAND_LINUX="auditwheel repair --exclude libtriton.so -w {dest_dir} {wheel}"
+
+          if [[ ${{ matrix.config.arch }} == 'x86_64' ]]; then
+            export CIBW_MANYLINUX_X86_64_IMAGE="quay.io/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest"
+          else
+            export CIBW_MANYLINUX_AARCH64_IMAGE="quay.io/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest"
+          fi
+
+          export CIBW_BUILD="cp3{10,11,12,13,14,14t}-manylinux_${{ matrix.config.arch }}"
+          export CIBW_SKIP="cp{35,36,37,38,39}-*"
+          python3 -m cibuildwheel . --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-wheels-upload
           path: ./wheelhouse/*.whl
 
-      - name: Setup obsutil and upload to OBS
-        if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')
-        shell: bash
-        env:
-          AK: ${{ secrets.NIGHTLY_OBS_AK }}
-          SK: ${{ secrets.NIGHTLY_OBS_SK }}
-          ARCH: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
+      - name: Install Azure CLI
+        if: ${{ steps.check-version.outputs.new_commit == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         run: |
-          set -eu
-          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-            echo "OBS credentials are empty."
-            exit 1
-          fi
-          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" -o obsutil.tar.gz
-          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil_linux_* obsutil
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-          OBS_DIR="obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
-          obsutil/obsutil cp -u wheelhouse/*.whl "${OBS_DIR}"
+      - name: Azure login
+        if: ${{ steps.check-version.outputs.new_commit == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-          # Regenerate index.html from every .whl currently in the directory
-          # (non-recursive, short format), keeping only the basenames.
-          obsutil/obsutil ls "${OBS_DIR}" -d -s -limit=0 \
-            | grep -oE '[^/]+\.whl$' \
-            | sort -u > files.txt
-          while IFS= read -r f; do
-            printf "<a href='%s'>%s</a><br />\n" "$f" "$f"
-          done < files.txt > index.html
-          obsutil/obsutil cp index.html "${OBS_DIR}"
+      - id: generate-token
+        name: Generate token
+        if: ${{ steps.check-version.outputs.new_commit == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        run: |
+          AZ_TOKEN=$(az account get-access-token --query accessToken)
+          echo "::add-mask::$AZ_TOKEN"
+          echo "access_token=$AZ_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Publish wheels to Azure DevOps
+        if: ${{ steps.check-version.outputs.new_commit == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        run: |
+          python3 -m pip install twine
+          python3 -m twine upload -r Triton-Nightly -u TritonArtifactsSP -p ${{ steps.generate-token.outputs.access_token }} --config-file utils/nightly.pypirc --non-interactive --verbose wheelhouse/*
+
+      - name: Azure Logout
+        if: ${{ steps.check-version.outputs.new_commit == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (success() || failure()) }}
+        run: |
+          az logout
+          az cache purge
+          az account clear
