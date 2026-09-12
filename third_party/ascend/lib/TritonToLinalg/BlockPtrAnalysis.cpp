@@ -28,6 +28,7 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
@@ -81,8 +82,11 @@ hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
 // Recognize original scalar-pointer producers whose converted result may act
 // as a memref carrier. The parse site still requires BaseMemRefType, so merely
 // appearing in this list never makes an unconverted pointer an opaque source.
+// scope.scope joins the list for the 3.8 aggregate frontend, which can now
+// yield a scalar (flattened block pointer) through an al.scope boundary.
 static bool isScalarPointerTransport(Operation *op) {
-  return op && isa<scf::IfOp, scf::ForOp, scf::WhileOp, arith::SelectOp>(op);
+  return op && isa<scf::IfOp, scf::ForOp, scf::WhileOp, arith::SelectOp,
+                   scope::ScopeOp>(op);
 }
 
 // Returns true only for sources known to carry a complete scalar integer
@@ -119,6 +123,65 @@ static Value unwrapScalarPointerMemRefCarrier(Value value) {
     value = input;
   }
   return value;
+}
+
+// A scope result that merely forwards a value defined outside the scope
+// region can be substituted by that outer value.  This keeps a block pointer
+// base from crossing the opaque scope boundary as a memref carrier: BishengIR
+// only recognizes GM->UB copies that read a function argument as padded
+// loads, so a copy sourced from a scope result is lowered as a plain copy
+// whose PIPE has no mapping.  Values computed inside the scope stay opaque.
+static Value resolveScopePassThrough(Value operand, Value remappedPtr,
+                                     ConversionPatternRewriter &rewriter) {
+  auto scopeResult = dyn_cast<OpResult>(operand);
+  if (!scopeResult || !isa<scope::ScopeOp>(scopeResult.getOwner()))
+    return remappedPtr;
+  unsigned resultIdx = scopeResult.getResultNumber();
+
+  // Prefer the already-converted scope (the driver runs in rollback mode,
+  // but ScopeConverter moves the region to the new op, leaving the original
+  // region empty).  Its terminator carries the converted operands.
+  scope::ScopeOp scopeOp =
+      dyn_cast_or_null<scope::ScopeOp>(remappedPtr.getDefiningOp());
+  if (!scopeOp) {
+    auto original = cast<scope::ScopeOp>(scopeResult.getOwner());
+    if (!original.getRegion().empty())
+      scopeOp = original;
+  }
+  if (!scopeOp || scopeOp.getRegion().empty())
+    return remappedPtr;
+
+  // ScopeConverter rebuilds the terminator before erasing the old one, and
+  // the rollback driver defers that erase: the block transiently holds both
+  // returns, with the rebuilt (converted) one FIRST.  getTerminator() would
+  // hand back the dangling original whose operands reference erased values.
+  scope::ReturnOp returnOp;
+  for (Operation &op : scopeOp.getRegion().front()) {
+    if (auto candidate = dyn_cast<scope::ReturnOp>(op)) {
+      returnOp = candidate;
+      break;
+    }
+  }
+  if (!returnOp || resultIdx >= returnOp.getNumOperands())
+    return remappedPtr;
+
+  Value forwarded = returnOp.getOperand(resultIdx);
+  if (!forwarded || !forwarded.getParentRegion())
+    return remappedPtr;
+  // Only pass-through values defined outside the scope region (function
+  // arguments, enclosing-block SSA values) can leave the boundary.
+  if (forwarded.getParentRegion() == &scopeOp.getRegion() ||
+      scopeOp.getRegion().isAncestor(forwarded.getParentRegion()))
+    return remappedPtr;
+
+  // The not-yet-converted terminator still holds the original value; resolve
+  // it through the conversion driver mapping, mirroring ScopeConverter.
+  Value resolved = rewriter.getRemappedValue(forwarded);
+  if (!resolved)
+    resolved = forwarded;
+  if (isa<BaseMemRefType>(resolved.getType()))
+    return unwrapScalarPointerMemRefCarrier(resolved);
+  return remappedPtr;
 }
 
 // MemAccType selectMaxMemAccTy(const MemAccType &v1, const MemAccType &v2) {
@@ -504,6 +567,7 @@ BlockDataParser::getScalarMemRef(Value ptr, Value memref, const Location &loc,
       definingOp && isScalarPointerTransport(definingOp)) {
     if (!isa<BaseMemRefType>(memref.getType()))
       return failure();
+    memref = resolveScopePassThrough(ptr, memref, rewriter);
     if (auto memrefType = dyn_cast<MemRefType>(memref.getType());
         memrefType && memrefType.getRank() == 1)
       return memref;
@@ -594,6 +658,7 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
           return op->emitError(
               "scalar pointer transport did not convert to a memref");
         }
+        remappedPtr = resolveScopePassThrough(operand, remappedPtr, rewriter);
         data.setSource(remappedPtr);
         // Transport producers carry a complete scalar address but do not
         // expose BlockData dimensions. Model the address as a one-element

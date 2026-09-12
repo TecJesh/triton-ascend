@@ -1,0 +1,30 @@
+diff --git a/third_party/nvidia/CMakeLists.txt b/third_party/nvidia/CMakeLists.txt
+--- a/third_party/nvidia/CMakeLists.txt
++++ b/third_party/nvidia/CMakeLists.txt
+@@ -12,9 +12,7 @@
+   find_program(TRITON_GSAN_CLANGXX NAMES clang++
+                PATHS "${LLVM_SYSPATH}/bin"
+-               REQUIRED NO_DEFAULT_PATH)
+-  if(NOT TRITON_GSAN_CLANGXX)
+-    message(FATAL_ERROR "clang++ is required to build gsan.ll")
+-  endif()
++               NO_DEFAULT_PATH)
++  if(TRITON_GSAN_CLANGXX)
+
+   set(TRITON_GSAN_INCLUDE_FLAGS "")
+   foreach(include_path IN ITEMS "${TRITON_CUDACRT_PATH}" "${TRITON_CUDART_PATH}")
+@@ -45,9 +45,12 @@
+       DEPENDS "${GSAN_RUNTIME_SRC}" ${GSAN_RUNTIME_HDRS}
+       COMMENT "Building GSan runtime"
+       VERBATIM)
+   add_custom_target(TritonNVIDIAGSanRuntime ALL DEPENDS "${GSAN_RUNTIME_IR}")
++  endif()
+
+   add_triton_plugin(TritonNVIDIA ${CMAKE_CURRENT_SOURCE_DIR}/triton_nvidia.cc LINK_LIBS TritonNVIDIAGPUToLLVM NVGPUToLLVM)
+   target_link_libraries(TritonNVIDIA PRIVATE Python3::Module pybind11::headers)
++  if(TRITON_GSAN_CLANGXX)
+   add_dependencies(TritonNVIDIA TritonNVIDIAGSanRuntime)
++  endif()
+ endif()
+ if(TRITON_BUILD_UT)
+   add_subdirectory(unittest)

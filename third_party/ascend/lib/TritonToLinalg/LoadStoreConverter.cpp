@@ -1461,6 +1461,46 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   return success();
 }
 
+// The 3.8 aggregate frontend flattens make_block_ptr stores into pointer
+// tensors; the reconstructed destination of a transposed tile then has a
+// contiguous first axis (strides [1, M]).  bishengir's nz2nd fixpipe
+// misaddresses such destinations (only part of the tile reaches GM), so the
+// store is rewritten into the direct view plus an explicit value transpose —
+// the encoding the descriptor-based backend has always used.
+static bool isTransposedStoreDestination(Value ptr) {
+  auto reCastOp = ptr.getDefiningOp<memref::ReinterpretCastOp>();
+  if (!reCastOp)
+    return false;
+  auto memrefType = dyn_cast<MemRefType>(reCastOp.getType());
+  if (!memrefType || memrefType.getRank() != 2)
+    return false;
+  auto strides = memrefType.getStridesAndOffset().first;
+  return strides.size() == 2 && strides[0] == 1 && strides[1] != 1;
+}
+
+static Value
+getDirectViewForTransposedStore(Value ptr, const Location &loc,
+                                ConversionPatternRewriter &rewriter) {
+  auto reCastOp = ptr.getDefiningOp<memref::ReinterpretCastOp>();
+  auto memrefType = cast<MemRefType>(reCastOp.getType());
+  auto [strides, offset] = memrefType.getStridesAndOffset();
+  SmallVector<int64_t> swappedShape = {memrefType.getShape()[1],
+                                       memrefType.getShape()[0]};
+  SmallVector<int64_t> swappedStrides = {strides[1], strides[0]};
+  auto swappedType = MemRefType::get(
+      swappedShape, memrefType.getElementType(),
+      StridedLayoutAttr::get(memrefType.getContext(), offset, swappedStrides),
+      memrefType.getMemorySpace());
+  auto mixedSizes = reCastOp.getMixedSizes();
+  auto mixedStrides = reCastOp.getMixedStrides();
+  SmallVector<OpFoldResult> swappedSizes = {mixedSizes[1], mixedSizes[0]};
+  SmallVector<OpFoldResult> swappedMixedStrides = {mixedStrides[1],
+                                                   mixedStrides[0]};
+  return rewriter.create<memref::ReinterpretCastOp>(
+      loc, swappedType, reCastOp.getSource(), reCastOp.getMixedOffsets()[0],
+      swappedSizes, swappedMixedStrides);
+}
+
 StoreConverter::StoreConverter(MLIRContext *context)
     : OpConversionPattern<triton::StoreOp>(context) {}
 
@@ -1481,12 +1521,30 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
     return rewriter.notifyMatchFailure(
         op, "unable to materialize the store pointer as a memref");
   ptr = *resolvedPtr;
+
+  // Rewrite a transposed flattened store into the direct view plus an
+  // explicit value transpose.  The boundary extents are computed on the
+  // original view (whose dims carry the block-ptr strides) and reversed
+  // together with the tile dims.  The mask is deliberately NOT transposed:
+  // the masked-store path parses it with MaskState, which cannot see through
+  // a linalg.transpose; the parsed dims/offsets are reversed below instead.
+  const bool transposedStore = isTransposedStoreDestination(ptr);
+  SmallVector<OpFoldResult> boundarySizes;
+  if (!op.getBoundaryCheck().empty()) {
+    boundarySizes = mlir::ConverterUtils::getBoundarySizes(
+        op.getBoundaryCheck(), ptr, loc, rewriter);
+    if (transposedStore)
+      std::reverse(boundarySizes.begin(), boundarySizes.end());
+  }
+  if (transposedStore) {
+    ptr = getDirectViewForTransposedStore(ptr, loc, rewriter);
+    val = mlir::ConverterUtils::getTransposedValue(val, loc, rewriter, {1, 0});
+  }
+
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
     auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
     SmallVector<OpFoldResult> srcOffsets;
     SmallVector<OpFoldResult> dstOffsets(boundarySizes.size(),
                                          rewriter.getIndexAttr(0));
@@ -1540,12 +1598,18 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
 
   // 3. Continuous masked stores.
   // Analyze the mask operand to determine at runtime the size of the data we
-  // are moving.
+  // are moving.  For a transposed store the mask is still in the original
+  // tile order; the parsed dims/offsets are reversed to match the transposed
+  // value and the direct view.
   MaskState mstate;
   auto isContMask = mstate.parse(mask, loc, rewriter);
 
   if (isContMask.failed()) {
     return failure();
+  }
+  if (transposedStore) {
+    std::reverse(mstate.dims.begin(), mstate.dims.end());
+    std::reverse(mstate.offsets.begin(), mstate.offsets.end());
   }
   LLVM_DEBUG({ llvm::dbgs() << *getModuleOpFromOperation(op) << "\n"; });
   auto srcSlice = mstate.getExtractSlice(val, loc, rewriter);

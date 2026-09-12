@@ -45,8 +45,10 @@
 #include "ascend/include/Utils/InterleaveOptimization.h"
 
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
@@ -1164,6 +1166,13 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
   IRMapping map;
   funcBody.cloneInto(&funcFuncBody, map);
 
+  // Cloning drops the op properties: any gpu.barrier whose `scope` property
+  // was cleared by the TritonToLLVM pass gets re-defaulted to `workgroup`
+  // here. The AscendNPU-IR fork's gpu dialect predates the `barrier_scope`
+  // attribute and cannot parse the printed IR, so clear the property again.
+  funcFuncBody.walk(
+      [](mlir::gpu::BarrierOp barrier) { barrier.setScopeAttr(nullptr); });
+
   if (!funcFuncBody.hasOneBlock()) {
     if (failed(convertMultipleBlockControlFlow(funcFunc, builder))) {
       llvm_unreachable("Encounter unsupported control flow");
@@ -1177,6 +1186,15 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
     term->erase();
   }
   func.erase();
+}
+
+static bool isScopeScalarPointerType(Type type) {
+  auto pointerType = dyn_cast<triton::PointerType>(type);
+  return pointerType && !isa<ShapedType>(pointerType.getPointeeType());
+}
+
+static bool hasScopeScalarPointerResult(scope::ScopeOp op) {
+  return llvm::any_of(op->getResultTypes(), isScopeScalarPointerType);
 }
 
 void TritonToLinalgPass::addDynamicLegal(
@@ -1236,6 +1254,24 @@ void TritonToLinalgPass::addDynamicLegal(
 
   target.addDynamicallyLegalOp<scf::IfOp>(
       [](scf::IfOp op) { return !TTOpConverters::hasScalarPointerResult(op); });
+
+  // The 3.8 aggregate frontend flattens make_block_ptr into plain SSA
+  // values, so an al.scope can now yield a scalar pointer that forwards a
+  // converted function argument. Such scopes must convert their result
+  // types to the memref carrier; descriptor-typed scopes stay legal.
+  target.addDynamicallyLegalOp<scope::ScopeOp>(
+      [](scope::ScopeOp op) { return !hasScopeScalarPointerResult(op); });
+
+  // scope.return has no legality info of its own, so the driver rejects it
+  // even when every operand type is legal. Its operand list mirrors the
+  // enclosing scope's result list: accept the terminator exactly when no
+  // scalar pointer operand remains. The rebuilt terminator produced by
+  // ScopeConverter — scalar pointer operands remapped to memref carriers —
+  // then passes, while the original pointer-typed terminator stays illegal
+  // and keeps forcing the scope conversion.
+  target.addDynamicallyLegalOp<scope::ReturnOp>([](scope::ReturnOp op) {
+    return llvm::none_of(op->getOperandTypes(), isScopeScalarPointerType);
+  });
 
   auto controlFlowTerminatorLegal = [](Operation *op) {
     Operation *parent = op->getParentOp();
@@ -1324,6 +1360,101 @@ public:
     rewriter.eraseOp(store);
     rewriter.eraseOp(nextAddPtr);
     rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+// Convert an al.scope whose result list contains a scalar pointer.  The
+// scope body forwards a pointer that the function signature conversion has
+// already turned into a memref carrier; converting the result types lets the
+// carrier cross the opaque scope boundary directly instead of leaving a live
+// memref-to-pointer materialization that fails legalization.
+class ScopeConverter : public OpConversionPattern<scope::ScopeOp> {
+public:
+  using OpConversionPattern<scope::ScopeOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(scope::ScopeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!hasScopeScalarPointerResult(op))
+      return rewriter.notifyMatchFailure(op,
+                                         "no scalar pointer result to convert");
+    const TypeConverter *typeConverter = getTypeConverter();
+    if (!typeConverter)
+      return rewriter.notifyMatchFailure(op, "requires a type converter");
+
+    // Only scalar pointer results take a carrier type; descriptor pointers
+    // and the i64 parts of a flattened block pointer keep their original
+    // types so the descriptor machinery is unaffected.
+    SmallVector<Type> convertedResultTypes;
+    convertedResultTypes.reserve(op.getNumResults());
+    for (Type resultType : op->getResultTypes()) {
+      if (!isScopeScalarPointerType(resultType)) {
+        convertedResultTypes.push_back(resultType);
+        continue;
+      }
+      Type convertedType = typeConverter->convertType(resultType);
+      if (!convertedType)
+        return rewriter.notifyMatchFailure(
+            op, "could not convert a scope scalar pointer result type");
+      convertedResultTypes.push_back(convertedType);
+    }
+
+    auto newScopeOp =
+        rewriter.create<scope::ScopeOp>(op.getLoc(), convertedResultTypes);
+    // ScopeOp stores the inherent `noinline` flag in its properties, so
+    // setAttrs only carries the discardable attributes over; copy the
+    // inherent property explicitly.
+    newScopeOp->setAttrs(op->getAttrs());
+    if (auto noInline = op.getNoInlineAttr())
+      newScopeOp.setNoInlineAttr(noInline);
+
+    // Move the original region instead of cloning it. Besides preserving
+    // side effects, this keeps nested operations in the conversion driver's
+    // worklist so the scope.return operands are remapped to the converted
+    // function arguments automatically.
+    //
+    // The generic ScopeOp builder only adds an empty region (it never
+    // creates the block), so front() must not be dereferenced
+    // unconditionally: on an empty region it is the sentinel iterator and
+    // tripping it aborts the whole pass.
+    if (!newScopeOp.getRegion().empty())
+      rewriter.eraseBlock(&newScopeOp.getRegion().front());
+    rewriter.inlineRegionBefore(op.getRegion(), newScopeOp.getRegion(),
+                                newScopeOp.getRegion().end());
+
+    // The conversion driver runs in rollback mode: the signature conversion of
+    // the enclosing tt.func has only RECORDED the replacement of its pointer
+    // arguments (old !tt.ptr -> new memref) in the driver's value mapping; the
+    // IR still shows the original operand and no materialization op exists.
+    // A scope that forwards such a function argument therefore must rebuild
+    // the terminator from the driver mapping, not from the operand chain in
+    // the IR.  After this region move the return is never re-examined, so
+    // without the rebuild its dangling pointer operand fails legalization.
+    auto returnOp =
+        cast<scope::ReturnOp>(newScopeOp.getRegion().front().getTerminator());
+    SmallVector<Value> convertedOperands;
+    convertedOperands.reserve(returnOp.getNumOperands());
+    for (Value operand : returnOp.getOperands()) {
+      // Prefer the conversion driver's mapping: signature-converted function
+      // arguments resolve to their new (memref) block arguments there even
+      // though the IR use is still the soon-to-be-erased original argument.
+      Value input = rewriter.getRemappedValue(operand);
+      if (!input)
+        input = operand;
+      // Fallback for materializations left in the IR by earlier phases.
+      if (auto materialization =
+              input.getDefiningOp<mlir::UnrealizedConversionCastOp>()) {
+        if (materialization.getInputs().size() == 1)
+          input = materialization.getInputs().front();
+      }
+      convertedOperands.push_back(input);
+    }
+    rewriter.setInsertionPoint(returnOp);
+    rewriter.create<scope::ReturnOp>(returnOp.getLoc(), convertedOperands);
+    rewriter.eraseOp(returnOp);
+
+    rewriter.replaceOp(op, newScopeOp.getResults());
     return success();
   }
 };
@@ -1496,18 +1627,22 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
                StructuredCustomOpConverter<hivm::CustomMacroOp>>(
       patterns.getContext());
 
+  // al.scope yielding a flattened scalar block pointer.
+  patterns.add<ScopeConverter>(typeConverter, patterns.getContext());
+
   if (!this->namedOps) {
     linalg::populateElementwiseToLinalgConversionPatterns(patterns);
   }
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect,
-                  LLVM::LLVMDialect, triton::ascend::TritonAscendDialect>();
+  registry
+      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+              tensor::TensorDialect, bufferization::BufferizationDialect,
+              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
+              annotation::AnnotationDialect, LLVM::LLVMDialect,
+              triton::ascend::TritonAscendDialect, scope::ScopeDialect>();
 }
 
 LogicalResult
