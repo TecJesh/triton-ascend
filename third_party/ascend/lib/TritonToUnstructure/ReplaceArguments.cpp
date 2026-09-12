@@ -127,16 +127,6 @@ static bool isStableFunctionScalarPointerBase(Value value) {
   return owner && isa<FunctionOpInterface>(owner);
 }
 
-// Offset analysis deliberately represents a scalar pointer selected by
-// scf.if as an opaque complete address. If such a value is a loop backedge,
-// the loop must choose the complete-address protocol before any edge is
-// rewritten; otherwise the init/region argument can become i64 while the
-// yield remains a pointer.
-static bool isOpaqueScalarPointerIfResult(Value value) {
-  return isScalarPointerType(value.getType()) &&
-         value.getDefiningOp<scf::IfOp>();
-}
-
 // A scalar pointer can use the established T2U offset representation only if
 // analysis found both a source pointer and a displacement.  An entry whose
 // source is the value itself is normally an opaque complete address (for
@@ -173,14 +163,37 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
   };
 
   if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    // A raw function-argument base must not anchor the relative-offset
+    // protocol on a while boundary.  The forward edge (scf.condition) is
+    // rewritten through the reconstructed pointer, and when that
+    // reconstruction cannot be re-parsed the condition keeps the pointer
+    // while the region arguments already became i64 — a mixed-type
+    // boundary.  Route such loops to the complete-address carrier instead,
+    // which is pointer-free on every structural edge.
     for (Value init : whileOp.getInits())
-      if (!canRewriteBoundary(init, /*allowStableBase=*/true))
+      if (!canRewriteBoundary(init, /*allowStableBase=*/false))
         return true;
     for (Value arg : whileOp.getBeforeArguments())
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
     for (Value arg : whileOp.getAfterArguments())
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
+        return true;
+    // A backedge value that offset analysis treats as an opaque complete
+    // address (e.g. a scalar pointer selected by scf.if or arith.select)
+    // cannot be rewritten to an i64 offset.  Falling back to the pointer
+    // representation must be decided here, before any edge is rewritten;
+    // otherwise the init/before/after arguments can become i64 while the
+    // yield stays a pointer.
+    for (Value value : whileOp.getYieldOp()->getOperands())
+      if (!canRewriteBoundary(value, /*allowStableBase=*/false))
+        return true;
+    // The condition arguments form the forward edge of the same cycle.  They
+    // are usually the before-block arguments, but a rewritten condition can
+    // forward a recomputed pointer instead; checking the edge itself keeps
+    // the boundary decision atomic for every structural edge.
+    for (Value value : whileOp.getConditionOp().getArgs())
+      if (!canRewriteBoundary(value, /*allowStableBase=*/false))
         return true;
     return false;
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
@@ -191,7 +204,7 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
     for (Value value : loopOp.getYieldedValues())
-      if (isOpaqueScalarPointerIfResult(value))
+      if (!canRewriteBoundary(value, /*allowStableBase=*/false))
         return true;
     return false;
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {

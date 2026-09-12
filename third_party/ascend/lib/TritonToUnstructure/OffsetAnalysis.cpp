@@ -25,6 +25,7 @@
 #include "Utils/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "triton/Dialect/Triton/IR/Types.h"
@@ -459,6 +460,21 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
         assert(opResult && "Expected operand to be an OpResult");
         parseStructuredCustomOp(defOp, loc, rewriter, offsetMap,
                                 opResult.getResultNumber());
+      } else if (isa<scope::ScopeOp>(defOp)) {
+        // scope.scope is opaque structured control flow: its pointer results
+        // are complete runtime addresses and its integer results are opaque
+        // scalar values.  Recording the value itself as the source (instead
+        // of leaving an empty PtrOffsetInfo) keeps parseSplat/parseAddPtr
+        // from building IR with a null offset operand.
+        if (isScalarPointer(operand)) {
+          recordOpaqueScalarPointer(operand, offsetMap);
+        } else if (isTensorPointer(operand)) {
+          recordOpaqueTensorPointer(operand, offsetMap);
+        } else if (isa<IntegerType>(operand.getType())) {
+          offsetMap[operand] = PtrOffsetInfo();
+          offsetMap[operand].setOffset(operand);
+          offsetMap[operand].setScalarLike(true);
+        }
       }
     }
   } else if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {

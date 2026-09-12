@@ -129,9 +129,32 @@ def _verify_loop_carried_variable(_is_triton_value, _is_triton_tensor, name, loo
         f'Please make sure that the type stays consistent.'
 
 
-def _reconstruct_value_from_ir(language, entry_block_arg, ret_type):
-    """Reconstruct a tensor value from IR."""
-    return language.core.tensor(entry_block_arg, ret_type)
+def _flatten_scope_ret_types(generator, ret_types):
+    """Flatten scope result frontend types into a list of MLIR types.
+
+    Upstream now models block pointers (tl.make_block_ptr) as aggregate
+    values, whose `type` is an `_aggregate_type` without a `to_ir()` method.
+    Flatten every result type through the generic `_flatten_ir_types`
+    protocol so aggregates contribute one MLIR type per IR-backed field and
+    constexprs contribute none.
+    """
+    ir_types = []
+    for ty in ret_types:
+        ty._flatten_ir_types(generator.builder, ir_types)
+    return ir_types
+
+
+def _reconstruct_scope_results(scope_op, ret_types):
+    """Reconstruct frontend values from the scope.scope results.
+
+    Mirrors code_generator.unflatten_ir_values: aggregate result types
+    reassemble their fields from consecutive IR results instead of wrapping
+    a single handle in a tensor.
+    """
+    from triton.compiler.code_generator import unflatten_ir_values
+
+    handles = [scope_op.get_result(i) for i in range(scope_op.get_num_results())]
+    return list(unflatten_ir_values(handles, ret_types))
 
 
 def handle_scope_with(generator, node):
@@ -147,7 +170,8 @@ def handle_scope_with(generator, node):
     """
     # Lazy imports to avoid circular dependency
     from triton import language
-    from triton.compiler.code_generator import enter_sub_region, _is_triton_value, _is_triton_tensor
+    from triton.compiler.code_generator import (enter_sub_region, _is_triton_value, _is_triton_tensor,
+                                                flatten_values_to_ir)
 
     context_expr = node.items[0].context_expr
     scope_attrs = _extract_scope_attributes(context_expr)
@@ -180,7 +204,7 @@ def handle_scope_with(generator, node):
 
         # Create scope operation with operands (values from outside)
         generator._set_insertion_point_and_loc(ip, last_loc)
-        scope_op = generator.builder.create_scope_op(mlir_attrs, [ty.to_ir(generator.builder) for ty in ret_types])
+        scope_op = generator.builder.create_scope_op(mlir_attrs, _flatten_scope_ret_types(generator, ret_types))
 
         # Create the entry block with arguments matching the operands
         entry_block = generator.builder.create_block_with_parent(scope_op.get_region(0), [])
@@ -190,15 +214,15 @@ def handle_scope_with(generator, node):
         generator.lscope = liveins.copy()
         generator.visit_compound_statement(node.body)
         generator.builder.set_insertion_point_to_end(entry_block)
-        reconstructed_values = []
-
-        for i in range(len(names)):
-            # generator.lscope[names[i]] is already a tensor, just get its IR handle
-            reconstructed_values.append(generator.lscope[names[i]].handle)
+        # Flatten each defined value (aggregates contribute one handle per
+        # IR-backed field) so the returned handles match the scope's result
+        # types one to one.
+        reconstructed_values = flatten_values_to_ir([generator.lscope[name] for name in names])
         generator.builder.scope_return(reconstructed_values)
 
     # After exiting enter_sub_region, update symbol table with results
-    # Convert IR values back to tensor objects
+    # Convert IR values back to tensor objects (or reassembled aggregates)
+    new_values = _reconstruct_scope_results(scope_op, ret_types)
     for i, name in enumerate(names):
-        generator.set_value(name, _reconstruct_value_from_ir(language, scope_op.get_result(i), ret_types[i]))
+        generator.set_value(name, new_values[i])
     return None

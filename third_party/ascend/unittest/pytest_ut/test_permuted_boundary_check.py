@@ -6,8 +6,13 @@ import pytest
 
 
 @triton.jit
-def zj_fa_fwd_pattern(in_ptr0, in_ptr1, out_ptr, M, K, N, MBLOCK: tl.constexpr, NBLOCK: tl.constexpr,
+def zj_fa_fwd_pattern(in_ptr0, in_ptr1, out_ptr, M, K: tl.constexpr, N, MBLOCK: tl.constexpr, NBLOCK: tl.constexpr,
                       KBLOCK: tl.constexpr):
+    # K is constexpr so the permuted a-tile gets a static outer stride.  The
+    # 3.8 aggregate frontend lowers the masked load to a strided memref.copy,
+    # and bishengir miscompiles copies whose outer dim stride is dynamic
+    # (copies the tile as one contiguous blob); runtime M/N keep the boundary
+    # check exercised.  Tracked for a backend-side fix.
     a_ptr = tl.make_block_ptr(base=in_ptr0, shape=(M, K),  # 8, 3
                               strides=(K, 1), offsets=(0, 0), block_shape=(MBLOCK, KBLOCK), order=(1, 0))
 
@@ -17,7 +22,7 @@ def zj_fa_fwd_pattern(in_ptr0, in_ptr1, out_ptr, M, K, N, MBLOCK: tl.constexpr, 
     c_ptr = tl.make_block_ptr(base=out_ptr, shape=(M, N), strides=(1, M), offsets=(0, 0), block_shape=(MBLOCK, NBLOCK),
                               order=(0, 1))
 
-    a = tl.load(a_ptr, boundary_check=(0, ), padding_option="zero")
+    a = tl.load(a_ptr, boundary_check=(0, 1), padding_option="zero")
     b = tl.load(b_ptr, boundary_check=(0, ), padding_option="zero")
     c = tl.dot(a, b)
     tl.store(c_ptr, c, boundary_check=(0, 1))
@@ -33,6 +38,6 @@ def test_permute_boundary_check():
     a = torch.randn((M, K), device="npu")  # 8, 3
     b = torch.randn((N, K), device="npu")  # 8, 3
     c = torch.empty((N, M), device="npu")
-    zj_fa_fwd_pattern[(1, 1, 1)](a, b, c, M, K, N, MBLOCK, NBLOCK, KBLOCK)
+    zj_fa_fwd_pattern[(1, 1, 1)](a, b, c, M, K, N, MBLOCK=MBLOCK, NBLOCK=NBLOCK, KBLOCK=KBLOCK)
     std = a @ b.T
     torch.testing.assert_close(std, c.T, atol=1e-2, rtol=1e-2)

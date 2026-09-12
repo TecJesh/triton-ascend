@@ -44,16 +44,28 @@ _TIMING_SCRIPT = ("import time\n"
                   "import triton\n"
                   "print((time.perf_counter() - t) * 1000)\n")
 
+# Number of fresh-subprocess samples per assertion. Assert on the minimum:
+# scheduler/IO contention on a loaded CI machine can only slow a sample down,
+# never speed it up, so the minimum reflects the true import cost while
+# absorbing jitter (a real eager-init regression slows every sample).
+NUM_SAMPLES = 3
 
-@pytest.mark.parametrize("run_id", range(3))
-def test_import_triton_time_under_limit(run_id):
+
+def _measure_import_ms():
     result = subprocess.run(
         [sys.executable, "-c", _TIMING_SCRIPT],
         capture_output=True,
         text=True,
         check=True,
     )
-    elapsed_ms = float(result.stdout.strip())
-    msg = (f"run {run_id}: import triton took {elapsed_ms:.1f} ms "
+    return float(result.stdout.strip())
+
+
+def test_import_triton_time_under_limit():
+    # Warm-up: populate page cache and .pyc files so the measured samples
+    # reflect steady-state import cost, not cold-cache artefacts.
+    _measure_import_ms()
+    elapsed_ms = min(_measure_import_ms() for _ in range(NUM_SAMPLES))
+    msg = (f"min of {NUM_SAMPLES} runs: import triton took {elapsed_ms:.1f} ms "
            f"(limit {IMPORT_TIME_LIMIT_MS} ms)")
     assert elapsed_ms < IMPORT_TIME_LIMIT_MS, msg
