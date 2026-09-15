@@ -57,14 +57,12 @@ Triton Ascend
    算子责任人清单 <triton_api/op_owner_list>
    libdevice开发者手册 <libdevice/libdevice_developer_guide>
 
-.. .. toctree::
-..    :maxdepth: 1
-..    :titlesonly:
-..    :caption: 昇腾扩展 API 接口说明
+.. toctree::
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 昇腾拓展API
 
-..    triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
-..    triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
-..    triton.extension.buffer.language <python-api/triton.language.extra.extension.buffer.language>
+   昇腾拓展API <triton_api_extension/index>
 
 
 .. toctree::

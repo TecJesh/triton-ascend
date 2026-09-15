@@ -136,4 +136,4 @@ annotation.mark %alloc_5 {effects = ["write", "read"]}
 - [`bl.alloc`](../bl/alloc.md)：在指定地址空间分配 buffer
 - [`bl.to_buffer`](../bl/to_buffer.md)：将 tensor 搬运/绑定到指定地址空间的 buffer
 - [`bl.subview`](../bl/subview.md)：在已有 buffer 上创建子视图（地址空间沿用源 buffer）
-- [`al.fixpipe`](../bl/fixpipe.md)：L0C → UB 的专用搬运通路
+- [`al.fixpipe`](./fixpipe.md)：L0C → UB 的专用搬运通路

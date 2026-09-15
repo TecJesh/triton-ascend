@@ -141,6 +141,6 @@ hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>}
 
 ## 8. 相关接口
 
-- [`bl.alloc`](alloc.md)：分配 UB 目标 buffer
-- [`tl.dot`](../../triton/language/dot.md)：矩阵乘（Cube 计算，输出驻留 L0C）
+- [`bl.alloc`](../bl/alloc.md)：分配 UB 目标 buffer
+- [`tl.dot`](../../triton_api/Linear_Algebra_Ops/dot.md)：矩阵乘（Cube 计算，输出驻留 L0C）
 - [`al.ascend_address_space`](../al/ascend_address_space.md)：昇腾地址空间枚举
