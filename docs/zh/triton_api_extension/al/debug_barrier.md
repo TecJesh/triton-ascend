@@ -20,15 +20,15 @@ class SYNC_IN_VF(enum.Enum):
              ST_VLD = auto()
              LD_VST = auto()
              ST_VST = auto()
- 
- 
+
+
          @builtin
          def debug_barrier(
              sync_mode: SYNC_IN_VF,
              _builder=None,
          ) -> None:
              return semantic.debug_barrier(sync_mode.name, _builder)
- 
+
 ```
 
 ## 3. 参数说明
