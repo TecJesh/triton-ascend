@@ -893,6 +893,10 @@ TritonTypeConverter::TritonTypeConverter() {
 
 void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
                                         bool globalKernel) {
+  // Declarations have no body to append the program-info arguments to.
+  if (func.isDeclaration())
+    return;
+
   OpBuilder b(func);
 
   auto origFuncType = func.getFunctionType();
@@ -918,10 +922,18 @@ void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
     func.getBody().front().addArgument(b.getI32Type(), func.getLoc());
   }
 
-  if (globalKernel) {
-    func->setAttr(globalKernelAttr, b.getStringAttr(""));
-  } else {
-    func->setAttr(globalKernelAttr, b.getStringAttr("local"));
+  // Only the public entry kernel carries the global_kernel attribute:
+  // bishengir's AdaptTritonKernel labels every function with this attribute
+  // as a device entry and rewrites its argument list accordingly, which
+  // would corrupt the signature of private jit-function callees reached
+  // through device-side func.call. Private helpers keep the appended
+  // program-info arguments but no global_kernel attribute.
+  if (func.getSymVisibility() == "public") {
+    if (globalKernel) {
+      func->setAttr(globalKernelAttr, b.getStringAttr(""));
+    } else {
+      func->setAttr(globalKernelAttr, b.getStringAttr("local"));
+    }
   }
 }
 
@@ -1130,6 +1142,10 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
   auto castType = FunctionType::get(func.getContext(), inputTypes, retTypes);
 
   auto funcFunc = builder.create<func::FuncOp>(func.getLoc(), name, castType);
+  // Preserve the original visibility: private jit-function callees must stay
+  // private so the host-side workspace/sync-block-lock arguments are only
+  // inserted into the public entry kernel.
+  funcFunc.setVisibility(func.getVisibility());
   funcFunc.setAllArgAttrs(argAttrs);
   funcFunc.setAllResultAttrs(resAttrs);
   auto kernelAttr = func->getAttr(globalKernelAttr);
@@ -1291,6 +1307,54 @@ void TritonToLinalgPass::addDynamicLegal(
 
 namespace {
 
+/// Convert a surviving `tt.call` (a jit-function call that the TTIR-stage
+/// generic MLIR inliner could not inline, e.g. a multi-block callee called
+/// from inside a single-block region like `scf.for`) into a real device
+/// function call, mirroring NVIDIA's TritonCallOpPattern. The callee's
+/// trailing program-info arguments (grid values appended by addProgramInfo)
+/// are forwarded from the caller.
+class TritonCallOpPattern : public OpConversionPattern<triton::CallOp> {
+public:
+  using OpConversionPattern<triton::CallOp>::OpConversionPattern;
+
+  // Matches TritonToLinalgPass::TRITON_PROGRAM_INFO_ARG_COUNT
+  // (= LAUNCH_GRID_RANK * 2), kept local like the constants in
+  // FunctionConverter's GetProgramIDConverter/GetNumProgramsConverter.
+  static uint32_t constexpr PROGRAM_INFO_ARG_COUNT =
+      (getMaxEnumValForProgramIDDim() + 1) * 2;
+
+  LogicalResult
+  matchAndRewrite(triton::CallOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto caller = op->getParentOfType<triton::FuncOp>();
+    if (!caller)
+      return failure();
+
+    const TypeConverter *typeConverter = getTypeConverter();
+    if (!typeConverter)
+      return rewriter.notifyMatchFailure(op, "requires a type converter");
+
+    SmallVector<Type> resultTypes;
+    if (failed(typeConverter->convertTypes(op.getResultTypes(), resultTypes)))
+      return failure();
+
+    SmallVector<Value> operands(adaptor.getOperands().begin(),
+                                adaptor.getOperands().end());
+    Block &callerEntry = caller.getBody().front();
+    auto callerArgs = callerEntry.getArguments();
+    if (callerArgs.size() < PROGRAM_INFO_ARG_COUNT)
+      return failure();
+    for (unsigned i = 0; i < PROGRAM_INFO_ARG_COUNT; ++i) {
+      operands.push_back(
+          callerArgs[callerArgs.size() - PROGRAM_INFO_ARG_COUNT + i]);
+    }
+
+    rewriter.replaceOpWithNewOp<func::CallOp>(op, op.getCallee(), resultTypes,
+                                              operands);
+    return success();
+  }
+};
+
 /// Route the specific `splat(base) -> addptr(scan) -> addptr(constant) ->
 /// store` form through the existing indirect-store operation before use
 /// analysis. Lowering either addptr independently would materialize a memref
@@ -1409,6 +1473,7 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   populateFunctionOpInterfaceTypeConversionPattern<triton::FuncOp>(
       patterns, typeConverter);
 
+  patterns.add<TritonCallOpPattern>(typeConverter, patterns.getContext());
   patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
   patterns.add<LoadStoreConverter::AddPtrConverter>(patterns.getContext());
@@ -1944,6 +2009,9 @@ void TritonToLinalgPass::runOnOperation() {
 
   // 8. Convert function prologue/epilogue.
   moduleOp.walk([&](triton::FuncOp func) {
+    // Declarations have no body to convert; leave them for the verifier.
+    if (func.isDeclaration())
+      return;
     this->convertTTFunc(func, existDot, existSIMTOp);
   });
 
@@ -2246,7 +2314,10 @@ void TritonToLinalgPass::runOnOperation() {
   // Force to add an argument at the beginning of function arguments, which
   // represents stub arg for workspace. Default type is memref<?xi8>
   for (auto func : getOperation().getOps<func::FuncOp>()) {
-    if (!func->hasAttr("global_kernel"))
+    // Only the public entry kernel receives the host-side workspace /
+    // sync-block-lock arguments. Private helper functions reached through
+    // device-side func.call keep their converted signature.
+    if (!func->hasAttr("global_kernel") || func.isPrivate())
       continue;
 
     auto context = func.getContext();
