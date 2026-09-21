@@ -36,12 +36,14 @@ no exception, and the output matches the reference computed with the
 surviving config.  On 3.6 the per-config handler already drops the failing
 config, so the test passes there as well.
 
-config #1 sets ``STRIDE0=0``: the leading axis of ``tl.make_block_ptr``
-gets stride 0 and is boundary-checked.  TritonToLinalg's
-``getBoundarySizes()`` (third_party/ascend/lib/Utils/Utils.cpp) then
-divides the flat block offset by the zero stride, failing the pass
-(MLIRCompilationError).  config #2 uses the row-major stride and
-compiles fine.
+Since the upstream make_block_ptr rewrite (aggregate-based materialization,
+triton 3.8), a zero-stride checked axis no longer reaches TritonToLinalg's
+``getBoundarySizes()`` (the block pointer is materialized into plain pointer
+arithmetic before lowering), so the STRIDE0=0 config compiles and would be
+benchmarked like any other.  The compile-failing config is therefore
+triggered with ``tl.static_assert`` instead: config #1 asserts a false
+condition (STRIDE0=0) and fails compilation, config #2 passes and produces
+the reference output.
 """
 import torch
 import torch_npu
@@ -53,13 +55,14 @@ import triton.backends.ascend.runtime  # noqa: F401
 
 @triton.autotune(
     configs=[
-        triton.Config({'STRIDE0': 0}, num_warps=4),  # bad: zero-stride checked axis
+        triton.Config({'STRIDE0': 0}, num_warps=4),  # bad: static_assert fails
         triton.Config({'STRIDE0': 64}, num_warps=4),  # good: row-major stride
     ],
     key=[],
 )
 @triton.jit
 def boundary_kernel(in_ptr, out_ptr, M, N, STRIDE0: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+    tl.static_assert(STRIDE0 > 0, "STRIDE0 must be positive")
     bptr = tl.make_block_ptr(
         base=in_ptr,
         shape=(M, N),

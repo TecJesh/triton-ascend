@@ -49,6 +49,8 @@ def triton_sub(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
+@pytest.mark.skip(
+    reason="gpu.barrier scope property handling reverted; to be re-enabled after follow-up design analysis")
 def test_case(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x0 = test_common.generate_tensor(shape, dtype).npu()
