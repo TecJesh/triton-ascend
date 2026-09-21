@@ -1,234 +1,318 @@
-<!-- markdownlint-disable-file MD041 -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
-  </picture>
-</p>
 
-<h3 align="center"><font size="68">
-Triton-Ascend
-</font></h3>
+| **`Documentation`** | **`Nightly Wheels`** |
+|-------------------- | -------------------- |
+| [![Documentation](https://github.com/triton-lang/triton/actions/workflows/documentation.yml/badge.svg)](https://triton-lang.org/) | [![Wheels](https://github.com/triton-lang/triton/actions/workflows/wheels.yml/badge.svg)](https://github.com/triton-lang/triton/actions/workflows/wheels.yml) |
 
-<p align="center">
-  <a href="https://deepwiki.com/triton-lang/triton-ascend">
-    <img src="https://deepwiki.com/badge.svg" alt="Ask AI on DeepWiki">
-  </a>
-</p>
+# Triton Conference 2025
 
-<p align="center">
-<a href="README.md"><b>English</b></a> | <a href="README_zh.md"><b>中文</b></a>
-</p>
+![Triton Banner](https://github.com/user-attachments/assets/b4b6972a-857c-417f-bf2c-f16f38a358c0)
 
-<p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
-</p>
+The 3rd Triton Developer Conference took place on October 21, 2025 at the Microsoft Silicon Valley Campus in Mountain View, California.
 
----
+### Conference Materials
 
-## 🔥 Latest News
+Conference recordings and materials are now available online:
 
-- [2026.07.31] Triton-Ascend 3.2.2 official release is now available
-- [2026.04.30] Triton-Ascend 3.2.1 official release is now available
-- [2026.01.20] Triton-Ascend 3.2.0 official release is now available
+- **Conference Videos:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLc_vA1r0qoiQqCdWFDUDqI90oY5EjfGuO)
+- **Conference Slides:** [Google Drive Folder](https://drive.google.com/drive/folders/1KB6tD3UM1J0_eUp-F-JSlGrargLBawIr)
 
-<div style="margin-left:1em">
-<details>
-<summary>More latest news</summary>
+For previous conference materials, see:
+- [2024 Conference Materials](docs/meetups/dev_conference_2024.md)
+- [2023 Conference Materials](docs/meetups/dev-meetup-2023.md)
 
-- [2025.11.14] Triton-Ascend 3.2.0rc4 pre-release is now available:<br>- [Extended the tt.fp_to_fp interface to add FP8 type conversion support](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [Added the scatter_ub_to_out interface to support efficient data scatter operations from UB to GM](https://gitcode.com/Ascend/triton-ascend/pull/864)
-- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and sglang open-source repositories
-- [2025.09.19] Supported Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history) extraction
-- [2025.08.15] Improved Atomic-class Triton Python API support, completed adaptation of key Triton operators in the Flaggems open-source repository, and provided reference examples for high-performance implementations of simple operators such as Matmul
-- [2025.06.30] Supported 85% of Triton Python APIs, supporting contiguous memory access, covering basic usage scenarios
-- [2025.05.20] Triton-Ascend is open-sourced, Gitcode repository is alive!
+# Triton
 
-</details>
-</div>
+This is the development repository of Triton, a language and compiler for writing highly efficient custom Deep-Learning primitives. The aim of Triton is to provide an open-source environment to write fast code at higher productivity than CUDA, but also with higher flexibility than other existing DSLs.
 
----
+The foundations of this project are described in the following MAPL2019 publication: [Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations](http://www.eecs.harvard.edu/~htk/publication/2019-mapl-tillet-kung-cox.pdf). Please consider citing this work if you use Triton!
 
-## 📖 Quick Installation
+The [official documentation](https://triton-lang.org) contains installation instructions and tutorials.  See also these third-party [Triton puzzles](https://github.com/srush/Triton-Puzzles), which can all be run using the Triton interpreter -- no GPU required.
 
-### Environment Preparation
+# Quick Installation
 
-#### Hardware Requirements
+You can install the latest stable release of Triton from pip:
 
-Supported operating systems: linux (aarch64/x86_64)
-
-Supported Ascend products: Atlas A2/A3/950 series
-
-Minimum hardware configuration: single card with 32GB memory (recommended)
-
-#### Software Dependencies
-
-Determine and install the Python, CANN, and TorchNPU software versions. This step must be completed before both package installation and source code compilation installation.
-
-- Python version selection: py3.9-py3.11 are all supported.
-
-- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.1.0.
-
-- TorchNPU version selection: The currently bundled TorchNPU version is 2.7.1.post8.
-
-### Accessing Ascend NPU
-
-If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
-
-### Quick Installation
-
-```bash
-# Taking the installation of triton-ascend 3.2.2 as an example
-pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
+```shell
+pip install triton
 ```
 
-### Source Installation
+Binary wheels are available for CPython 3.10-3.14.
 
-<div style="margin-left:1em">
-<details>
-<summary>More source installation</summary>
+# Install from source
 
-#### Install Dependencies
+```shell
+git clone https://github.com/triton-lang/triton.git
+cd triton
 
-```bash
-apt update
-apt install zlib1g-dev clang-15 lld-15
-apt install ccache # optional
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
-update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
-pip install ninja cmake wheel pybind11 # build-time dependencies
-```
-
-#### Build Triton-Ascend
-
-```bash
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-git checkout main
+pip install -r python/requirements.txt # build-time dependencies
 pip install -e .
 ```
 
-#### Custom LLVM Build (Optional)
+Or with a virtualenv:
 
-```bash
-# If you need to customize the LLVM build process, you can execute this step first before compiling Triton-Ascend
-# Check out the specified version of LLVM source code and apply patches
-git clone --no-checkout https://github.com/llvm/llvm-project.git
-cd llvm-project
-git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
-git apply fad3272.patch
+```shell
+git clone https://github.com/triton-lang/triton.git
+cd triton
 
-export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+python -m venv .venv --prompt triton
+source .venv/bin/activate
 
-# Build a custom LLVM version
-cd {PATH_TO}/llvm_project
-mkdir build
-cd build
-cmake ../llvm \
-    -G Ninja \
-    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-    -DCMAKE_LINKER=/usr/bin/lld-15 \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_ENABLE_ASSERTIONS=ON \
-    -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-    -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-    -DLLVM_ENABLE_LLD=ON \
-    -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-ninja install
-
-# Compile Triton-Ascend
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-
-LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
-TRITON_BUILD_WITH_CCACHE=true \
-TRITON_BUILD_WITH_CLANG_LLD=true \
-TRITON_BUILD_PROTON=OFF \
-TRITON_WHEEL_NAME="triton-ascend" \
-TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-python3 setup_ascend.py install
+pip install -r python/requirements.txt # build-time dependencies
+pip install -e .
 ```
 
-</details>
-</div>
+# Building with a custom LLVM
 
-### Docker Image Usage
+Triton uses LLVM to generate code for GPUs and CPUs.  Normally, the Triton build
+downloads a prebuilt LLVM, but you can also build and use LLVM from source.
 
-<div style="margin-left:1em">
+LLVM does not have a stable API, so the Triton build will not work at an
+arbitrary LLVM version.
+
+For convenience, use the following command to build LLVM and install Triton with the custom LLVM:
+
+```shell
+make dev-install-llvm
+```
+
 <details>
-<summary>More Docker image usage</summary>
+<summary>
+Alternatively, follow these steps to build LLVM from source manually.
+</summary>
 
-- We provide a Dockerfile to help you install the Docker environment image. The build process uses the `quay.io/ascend/cann` pre-built image as the base image, skipping the CANN installation step and significantly speeding up the build.
+1. Find the version of LLVM that Triton builds against. Check the `llvm_hash`
+field in `cmake/llvm-info.json` to see the current version. For example, if it
+says:
+       "llvm_hash": "49af6502c6dcb4a7f7520178bd14df396f78240c"
 
-- You need to specify the `CANN_BASE_IMAGE` parameter via `--build-arg` to select the appropriate CANN base image for your machine. Available CANN base image tags can be found at [quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags).
+   This means that the version of Triton you have builds against
+   [LLVM](https://github.com/llvm/llvm-project) 49af6502.
 
-- You can check the NPU model on your system using the npu-smi command.
+2. `git checkout` LLVM at this revision.  Optionally, make additional
+   modifications to LLVM.
 
-```bash
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-docker build \
---build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:9.1.0-a3-ubuntu22.04-py3.12 \
--t triton-ascend-image:latest -f ./docker/Dockerfile .
-```
+3. [Build LLVM](https://llvm.org/docs/CMake.html).  For example, you might run:
 
-- To start a container from this image, you can refer to the following command:
+       $ cd $HOME/llvm-project  # your clone of LLVM.
+       $ mkdir build
+       $ cd build
+       $ cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON ../llvm -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld;clang" -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU"
+       $ ninja
 
-```bash
-docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
---security-opt seccomp=unconfined \
---device=/dev/davinci0 \
---device=/dev/davinci1 \
---device=/dev/davinci2 \
---device=/dev/davinci3 \
---device=/dev/davinci4 \
---device=/dev/davinci5 \
---device=/dev/davinci6 \
---device=/dev/davinci7 \
---device=/dev/davinci_manager \
---device=/dev/devmm_svm \
---device=/dev/hisi_hdc \
--v /usr/local/dcmi:/usr/local/dcmi \
--v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
--v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
--v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
--v /home:/home \
--v /etc/ascend_install.info:/etc/ascend_install.info \
-triton-ascend-image:latest \
-/bin/bash
+4. Grab a snack, this will take a while.
 
-# Enter the container
-docker exec -u root -it triton-ascend_container /bin/bash
-```
+5. Build Triton as above, but set the following environment variables:
+
+       # Modify as appropriate to point to your LLVM build.
+       $ export LLVM_BUILD_DIR=$HOME/llvm-project/build
+
+       $ cd <triton install>
+       $ LLVM_INCLUDE_DIRS=$LLVM_BUILD_DIR/include \
+         LLVM_LIBRARY_DIR=$LLVM_BUILD_DIR/lib \
+         LLVM_SYSPATH=$LLVM_BUILD_DIR \
+         pip install -e .
 
 </details>
-</div>
 
-## ✏️ Documentation Entry
+# Tips for building
 
-- [Quick Start](./docs/zh/quick_start.md)
+- Set `TRITON_BUILD_WITH_CLANG_LLD=true` as an environment variable to use clang
+  and lld.  lld in particular results in faster builds.
 
-- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
+- Set `TRITON_BUILD_WITH_CCACHE=true` to build with ccache.
 
-- [Installation Guide](./docs/zh/installation_guide.md)
+- Set `TRITON_HOME=/some/path` to change the location of the `.triton`
+  directory where Triton's cache is located and downloads are stored
+  during the build. By default, this is the user's home directory. It
+  can be changed anytime.
 
-- [Architecture Design and Core Features](./docs/zh/architecture_design_and_core_features.md)
+- If you're running out of memory when building Triton, specify the `MAX_JOBS`
+  environment variable (to the `pip install -e .` command) to limit the
+  number of jobs.
 
-- [Operator Development Guide](./docs/zh/programming_guide/index.md)
+- Pass `--no-build-isolation` to `pip install` to make nop builds faster.
+  Without this, every invocation of `pip install` uses a different symlink to
+  cmake, and this forces ninja to rebuild most of the `.a` files.
 
-- [Operator Migration Guide](./docs/zh/migration_guide/migrate_from_gpu.md)
+- The build system creates a `compile_commands.json` file under the Triton repo
+  directory. This file is used by VSCode IntelliSense and clangd to provide
+  code completion and other features for C++ code.
 
-- [Operator Debugging Guide](./docs/zh/debug_guide/debugging.md#)
+  If IntelliSense does not work, you can try the following steps:
 
-- [Performance Tuning Guide](./docs/zh/debug_guide/profiling.md#)
+    - Do a local build. Run command `pip install -e .`.
+    - Get the full path to the `compile_commands.json` file produced by the build:
+      `find ./build -name 'compile_commands.json' | xargs readlink -f`.
+      You might get a full path similar to `/Users/{username}/triton/build/cmake.macosx-11.1-arm64-cpython-3.12/compile_commands.json`.
+    - In VSCode, install the
+      [C/C++
+      extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools),
+      then open the command palette (`Shift + Command + P` on Mac, or `Shift +
+      Ctrl + P` on Windows/Linux) and open `C/C++: Edit Configurations (UI)`.
+    - Open "Advanced Settings" and paste the full path to
+      `compile_commands.json` into the "Compile Commands" textbox.
 
-- [Environment Variables Reference](./docs/zh/environment_variable_and_compiler_options_reference.md)
+# Running tests
 
-- [FAQ](./docs/zh/FAQ.md)
+There currently isn't a turnkey way to run all the Triton tests, but you can
+follow the following recipe:
 
-## 🏘️ Community Activities
+```shell
+# One-time setup.  Note this will reinstall local Triton because torch
+# overwrites it with the public version.
+$ make dev-install
 
-1. [Meeting Time, Link, and Minutes](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
+# To run all tests (requires a GPU)
+$ make test
 
-## 🤝 Community and Contribution
+# Or, to run tests without a gpu
+$ make test-nogpu
+```
 
-- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/zh/community/CONTRIBUTING_zh.md)
+# Tips for hacking
 
-- Please report any bugs you encounter via [Issue](https://github.com/triton-lang/triton-ascend/issues).
+For detailed instructions on how to debug Triton's frontend, please refer to this [tutorial](https://triton-lang.org/main/programming-guide/chapter-3/debugging.html). The following includes additional tips for hacking on Triton's backend.
+
+**Configuration knobs**
+
+See [`python/triton/knobs.py`](python/triton/knobs.py) for the full list of configuration knobs. You can set those knobs directly in python or use environment variables to control them. Below are some of the environment variables you can specify (see `knobs.py` for the full list):
+
+- `MLIR_ENABLE_DUMP=1` dumps the IR before every MLIR pass Triton runs, for all
+   kernels. Use `MLIR_ENABLE_DUMP=kernelName` to dump for a specific kernel only.
+  - Triton cache can interfere with the dump. In cases where `MLIR_ENABLE_DUMP=1` does not work, try cleaning your triton cache: `rm -r ~/.triton/cache/*`.
+- `MLIR_DUMP_PATH` specifies where `MLIR_ENABLE_DUMP` will dump to. If unset will dump to stderr.
+- `LLVM_IR_ENABLE_DUMP=1` dumps the IR before every pass run over the LLVM IR.
+- `TRITON_REPRODUCER_PATH=<reproducer_path>` will generate an MLIR reproducer file
+  at `<reproducer_path>` before each MLIR compiler stage. If any of the stages fail,
+  `<reproducer_path>` will be a local MLIR reproducer captured right before the failing pass.
+- `TRITON_INTERPRET=1` uses the Triton interpreter instead of running on the
+  GPU.  You can insert Python breakpoints in your kernel code!
+- `TRITON_ENABLE_LLVM_DEBUG=1` passes `-debug` to LLVM, printing a lot of
+  debugging information to stdout.  If this is too noisy, run with just
+  `TRITON_LLVM_DEBUG_ONLY` instead to limit the output.
+  - An alternative way to reduce output noisiness is running with
+  `LLVM_IR_ENABLE_DUMP=1`, extract the IR before the LLVM pass of interest, and
+  then run LLVM's `opt` standalone, perhaps passing `-debug-only=foo` on the
+  command line.
+
+- `TRITON_LLVM_DEBUG_ONLY=<comma-separated>` is the equivalent of LLVM's
+  `-debug-only` command-line option. This limits the LLVM debug output to
+  specific pass or component names (which are specified using `#define
+  DEBUG_TYPE` throughout LLVM and Triton) in order to allow the debug output to
+  be less noisy. `TRITON_LLVM_DEBUG_ONLY` allows for one or more comma
+  separated values to be specified (eg
+  `TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions"` or
+  `TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions,regalloc"`).
+- `TRITON_ENABLE_ASAN=1` invokes the LLVM address sanitizer for
+  memory leak and out of bounds access detection. Currently only supported on the AMD
+  backend. This must be run using the ASAN libraries documented [here](https://rocm.docs.amd.com/projects/llvm-project/en/latest/conceptual/using-gpu-sanitizer.html).
+  - When enabling the address sanitizer it is recommended to disable various memory caching strategies
+  both within the ROCm stack and PyTorch. This will give the address sanitizer the best chance at finding the
+  memory fault where it originates. See this [test](https://github.com/triton-lang/triton/blob/main/third_party/amd/python/test/test_address_sanitizer.py) for more details.
+
+- `USE_IR_LOC={ttir,ttgir}` reparses the IR such that the location information
+  will be the line number of the IR file with that particular extension,
+  instead of line number of the python file. This can provide a direct mapping
+  from the IR to llir/ptx. When used with performance tools, it can provide a
+  breakdown on IR instructions.
+- `TRITON_PRINT_AUTOTUNING=1` prints out the best autotuning config and total time
+  spent for each kernel after autotuning is complete.
+- `DISABLE_LLVM_OPT` will disable llvm optimizations for make_llir and make_ptx
+  if its value is true when parsing as Bool. Otherwise, it will be parsed as a list
+  of flags to disable llvm optimizations. One usage case is
+  `DISABLE_LLVM_OPT="disable-lsr"`
+  Loop strength reduction is known to cause up to 10% performance changes for
+  certain kernels with register pressure.
+- `TRITON_ALWAYS_COMPILE=1` forces to compile kernels regardless of cache hit.
+- `MLIR_ENABLE_TIMING` dumps the timing information for each MLIR pass.
+- `LLVM_ENABLE_TIMING` dumps the timing information for each LLVM pass.
+- `TRITON_DEFAULT_FP_FUSION` overrides the default behavior of allowing fp fusion (mul+add->fma).
+- `MLIR_ENABLE_DIAGNOSTICS=<comma-separated>` controls diagnostic emission in MLIR.
+  Options are: `warnings`, `remarks`, `stacktraces`, `operations`.
+  Use comma-separated values to customize output. For example,
+  `MLIR_ENABLE_DIAGNOSTICS=remarks,operations` enables remarks and IR operations,
+  while `MLIR_ENABLE_DIAGNOSTICS=warnings,stacktraces` enables warnings with
+  stacktraces. By default, only errors are shown. Setting `warnings` includes
+  errors and warnings; `remarks` includes errors, warnings, and remarks.
+- `MLIR_ENABLE_REMARK` is deprecated. Please use `MLIR_ENABLE_DIAGNOSTICS=remarks`.
+- `TRITON_KERNEL_DUMP` enables the dumping of the IR from each compilation stage and the final ptx/amdgcn.
+- `TRITON_DUMP_DIR` specifies the directory to save the dumped IR and ptx/amdgcn when `TRITON_KERNEL_DUMP` is set to 1.
+- `TRITON_KERNEL_OVERRIDE` enables the override of the compiled kernel with a user-specified IR/ptx/amdgcn at the beginning of each compilation stage.
+- `TRITON_OVERRIDE_DIR` specifies the directory from which to load the IR/ptx/amdgcn files when `TRITON_KERNEL_OVERRIDE` is set to 1.
+- `TRITON_F32_DEFAULT` sets the default input precision of `tl.dot` when using 32-bit floats, which can be either `ieee`, `tf32`, or `tf32x3`.
+- `TRITON_FRONT_END_DEBUGGING=1` disables exception wrapping when an error occurs in the compiler frontend, allowing the full stack trace to be seen.
+- `TRITON_DISABLE_LINE_INFO=1` removes all line information from the module.
+- `PTXAS_OPTIONS` passes additional command-line options to the PTX assembler `ptxas` (only on NVIDIA).
+- `LLVM_EXTRACT_DI_LOCAL_VARIABLES` emit full debug info, allowing for eval of values in gpu debuggers (ie cuda-gdb, rocm-gdb etc)
+- `TRITON_DEFAULT_BACKEND=<backend>` optionally sets the default backend used by Triton when
+  constructing the active driver (i.e., `triton.runtime.driver.active`).
+
+> [!NOTE]
+> Some of these environment variables don't have a knob in `knobs.py`-- those are only relevant to the C++ layer(s), hence they don't exist in the python layer.
+
+**Kernel Override Steps**
+
+```bash
+export TRITON_ALWAYS_COMPILE=1
+export TRITON_KERNEL_DUMP=1
+export TRITON_DUMP_DIR=<dump_dir>
+export TRITON_KERNEL_OVERRIDE=1
+export TRITON_OVERRIDE_DIR=<override_dir>
+# Step 1: Run the kernel once to dump kernel's IRs and ptx/amdgcn in $TRITON_DUMP_DIR
+# Step 2: Copy $TRITON_DUMP_DIR/<kernel_hash> to $TRITON_OVERRIDE_DIR
+# Step 3: Delete the stages that you do not want to override and modify the stage you do want to override
+# Step 4: Run the kernel again to see the overridden result
+```
+
+**Compiler Pipeline Inspection Steps**
+To introspect the pipeline `add_stages`, before running your kernels, simply set
+the add_stages_inspection_hook like so:
+
+```python
+def inspect_stages(_self, stages, options, language, capability):
+    # inspect or modify add_stages here
+triton.knobs.runtime.add_stages_inspection_hook = inspect_stages
+```
+Examples of how to use this for out of tree plugin passes is [here](lib/Plugins/README.md)
+# Changelog
+
+Version 2.0 is out! New features include:
+
+- Many, many bug fixes
+- Performance improvements
+- Backend rewritten to use MLIR
+- Support for kernels that contain back-to-back matmuls (e.g., flash attention)
+
+# Contributing
+
+Community contributions are more than welcome, whether it be to fix bugs or to add new features at [github](https://github.com/triton-lang/triton/). For more detailed instructions, please visit our [contributor's guide](CONTRIBUTING.md).
+
+# Compatibility
+
+Supported Platforms:
+
+- Linux
+
+Supported Hardware:
+
+- NVIDIA GPUs (Compute Capability 8.0+)
+- AMD GPUs (ROCm 6.2+)
+- Under development: CPUs
+
+# Development Container (Dev Container)
+
+**Dev Containers** for the Triton project are available from
+the [triton-dev-containers repository](https://github.com/redhat-et/triton-dev-containers).
+
+### Key Benefits:
+- **Consistency**: All developers can work with the same development
+  environment, ensuring uniform behavior across different systems.
+- **Isolation**: The container prevents potential conflicts with software
+  installed on your local machine.
+- **Portability**: Easily share the development environment with team members,
+  minimizing onboarding time and setup issues.
+
+### How to Use the Dev Container:
+
+For detailed instructions on how to use the dev containers, please see
+the [dev container user guide](https://github.com/redhat-et/triton-dev-containers/blob/main/.devcontainer/devcontainer.md).
