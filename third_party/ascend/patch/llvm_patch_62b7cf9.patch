@@ -1,7 +1,20 @@
 diff --git a/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td b/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td
-index 77d780425c3c..c8736e4e9f71 100644
+index 1f8b07aed3f0..876b0cee5288 100644
 --- a/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td
 +++ b/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td
+@@ -123,9 +123,9 @@ class Arith_FloatBinaryOpWithRoundingMode<string mnemonic,
+             ::mlir::arith::RoundingModeAttr{});
+     }]>,
+   ];
+-  let assemblyFormat = [{ $lhs `,` $rhs ($roundingmode^)?
+-                          (`fastmath` `` $fastmath^)?
+-                          attr-dict `:` type($result) }];
++  // LLVM 20 text: drop optional roundingmode (force-elide in custom print).
++  let assemblyFormat = ?;
++  let hasCustomAssemblyFormat = 1;
+ }
+ 
+ // Checks that tensor input and outputs have identical shapes. This is stricker
 @@ -212,8 +212,9 @@ class Arith_IntBinaryOpWithExactFlag<string mnemonic, list<Trait> traits = []> :
                 UnitAttr:$isExact)>,
      Results<(outs Arith_SignlessIntegerOrIndexLike:$result)> {
@@ -14,6 +27,19 @@ index 77d780425c3c..c8736e4e9f71 100644
  }
  
  //===----------------------------------------------------------------------===//
+@@ -1384,9 +1385,9 @@ def Arith_ExtUIOp :
+ 
+   let arguments = (ins SignlessFixedWidthIntegerLike:$in, UnitAttr:$nonNeg);
+   let results = (outs SignlessFixedWidthIntegerLike:$out);
+-  let assemblyFormat = [{
+-    $in (`nneg` $nonNeg^)? attr-dict `:` type($in) `to` type($out)
+-  }];
++  // LLVM 20 text: drop optional nneg (force-elide in custom print).
++  let assemblyFormat = ?;
++  let hasCustomAssemblyFormat = 1;
+   let hasFolder = 1;
+   let hasVerifier = 1;
+ }
 @@ -1552,10 +1553,7 @@ def Arith_TruncIOp : Arith_Op<"trunci",
        DefaultValuedAttr<Arith_IntegerOverflowAttr,
            "::mlir::arith::IntegerOverflowFlags::none">:$overflowFlags);
@@ -26,6 +52,32 @@ index 77d780425c3c..c8736e4e9f71 100644
    let hasFolder = 1;
    let hasCanonicalizer = 1;
    let hasVerifier = 1;
+@@ -1727,9 +1725,9 @@ def Arith_UIToFPOp :
+ 
+   let arguments = (ins SignlessFixedWidthIntegerLike:$in, UnitAttr:$nonNeg);
+   let results = (outs FloatLike:$out);
+-  let assemblyFormat = [{
+-    $in (`nneg` $nonNeg^)? attr-dict `:` type($in) `to` type($out)
+-  }];
++  // LLVM 20 text: drop optional nneg (force-elide in custom print).
++  let assemblyFormat = ?;
++  let hasCustomAssemblyFormat = 1;
+   let hasFolder = 1;
+   let hasCanonicalizer = 1;
+ }
+@@ -1832,9 +1830,9 @@ def Arith_IndexCastUIOp
+ 
+   let arguments = (ins IndexCastTypeConstraint:$in, UnitAttr:$nonNeg);
+   let results = (outs IndexCastTypeConstraint:$out);
+-  let assemblyFormat = [{
+-    $in (`nneg` $nonNeg^)? attr-dict `:` type($in) `to` type($out)
+-  }];
++  // LLVM 20 text: drop optional nneg (force-elide in custom print).
++  let assemblyFormat = ?;
++  let hasCustomAssemblyFormat = 1;
+   let hasFolder = 1;
+   let hasCanonicalizer = 1;
+ }
 diff --git a/mlir/include/mlir/Dialect/Bufferization/IR/Bufferization.h b/mlir/include/mlir/Dialect/Bufferization/IR/Bufferization.h
 index e735651d5366..26632e26cbbf 100644
 --- a/mlir/include/mlir/Dialect/Bufferization/IR/Bufferization.h
@@ -155,7 +207,7 @@ index a441fd82546e..543ab84ef896 100644
  
  //===----------------------------------------------------------------------===//
 diff --git a/mlir/include/mlir/Dialect/Func/IR/FuncOps.td b/mlir/include/mlir/Dialect/Func/IR/FuncOps.td
-index 06ce4f16c867..a17cec470904 100644
+index a31b86027609..23a22b6af279 100644
 --- a/mlir/include/mlir/Dialect/Func/IR/FuncOps.td
 +++ b/mlir/include/mlir/Dialect/Func/IR/FuncOps.td
 @@ -119,9 +119,7 @@ def CallOp : Func_Op<"call",
@@ -170,10 +222,11 @@ index 06ce4f16c867..a17cec470904 100644
  
  //===----------------------------------------------------------------------===//
 diff --git a/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td b/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td
-index 7891cf19ac92..f1bd61e5b888 100644
+index a9032820f564..a9f1c01a2310 100644
 --- a/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td
 +++ b/mlir/include/mlir/Dialect/GPU/IR/GPUOps.td
-@@ -1505,13 +1505,8 @@ def GPU_BarrierOp : GPU_Op<"barrier">,
+@@ -1504,13 +1504,8 @@ def GPU_BarrierOp : GPU_Op<"barrier">,
+     example, have the two subgroups of a workgroup arrive at `gpu.barrier` ops in
      different branches of an if statement and have this work.
    }];
 -  let assemblyFormat = [{
@@ -188,12 +241,11 @@ index 7891cf19ac92..f1bd61e5b888 100644
    let hasCanonicalizer = 1;
    let hasVerifier = 1;
    let builders = [OpBuilder<(
-                       ins CArg<"std::optional<::mlir::gpu::AddressSpace>",
 diff --git a/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td b/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td
-index e31e46124faf..c02cfd0d8946 100644
+index 688bc19cbf18..282350049a24 100644
 --- a/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td
 +++ b/mlir/include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td
-@@ -569,12 +569,6 @@ def LLVM_AssumeOp
+@@ -639,12 +639,6 @@ def LLVM_AssumeOp
    dag args = (ins I1:$cond);
    let arguments = !con(args, baseArgs);
  
@@ -207,7 +259,7 @@ index e31e46124faf..c02cfd0d8946 100644
    let builders = [
      OpBuilder<(ins "Value":$cond)>,
 diff --git a/mlir/include/mlir/Dialect/LLVMIR/LLVMOps.td b/mlir/include/mlir/Dialect/LLVMIR/LLVMOps.td
-index f6f1c90b481c..7d733db714ff 100644
+index d7c8cf236f0d..acf2b0c8778c 100644
 --- a/mlir/include/mlir/Dialect/LLVMIR/LLVMOps.td
 +++ b/mlir/include/mlir/Dialect/LLVMIR/LLVMOps.td
 @@ -416,14 +416,7 @@ def LLVM_LoadOp : LLVM_MemAccessOpBase<"load",
@@ -240,7 +292,7 @@ index f6f1c90b481c..7d733db714ff 100644
    string llvmBuilder = [{
      auto *inst = builder.CreateStore($value, $addr, $volatile_);
    }] # setOrderingCode
-@@ -625,7 +613,10 @@ def LLVM_AddrSpaceCastOp : LLVM_CastOp<"addrspacecast", "AddrSpaceCast",
+@@ -645,7 +633,10 @@ def LLVM_AddrSpaceCastOp : LLVM_CastOp<"addrspacecast", "AddrSpaceCast",
  }
  def LLVM_IntToPtrOp : LLVM_DereferenceableCastOp<"inttoptr", "IntToPtr",
                                    LLVM_ScalarOrVectorOf<AnySignlessInteger>,
@@ -252,7 +304,7 @@ index f6f1c90b481c..7d733db714ff 100644
  def LLVM_PtrToIntOp : LLVM_CastOp<"ptrtoint", "PtrToInt",
                                    LLVM_ScalarOrVectorOf<LLVM_AnyPointer>,
                                    LLVM_ScalarOrVectorOf<AnySignlessInteger>>;
-@@ -2409,16 +2400,7 @@ def LLVM_InlineAsmOp : LLVM_Op<"inline_asm", [DeclareOpInterfaceMethods<MemoryEf
+@@ -2482,16 +2473,7 @@ def LLVM_InlineAsmOp : LLVM_Op<"inline_asm", [DeclareOpInterfaceMethods<MemoryEf
  
    let results = (outs Optional<LLVM_Type>:$res);
  
@@ -271,10 +323,10 @@ index f6f1c90b481c..7d733db714ff 100644
    let extraClassDeclaration = [{
      static StringRef getElementTypeAttrName() {
 diff --git a/mlir/lib/Dialect/Arith/IR/ArithOps.cpp b/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
-index 83b3cec8d41a..fb2a0909f73e 100644
+index 008242daeaf3..7623338c43de 100644
 --- a/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
 +++ b/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
-@@ -668,6 +668,254 @@ void arith::MulUIExtendedOp::getCanonicalizationPatterns(
+@@ -770,6 +770,254 @@ void arith::MulUIExtendedOp::getCanonicalizationPatterns(
    patterns.add<MulUIExtendedToMulI>(context);
  }
  
@@ -529,7 +581,449 @@ index 83b3cec8d41a..fb2a0909f73e 100644
  //===----------------------------------------------------------------------===//
  // DivUIOp
  //===----------------------------------------------------------------------===//
-@@ -1572,6 +1820,83 @@ LogicalResult arith::ScalingExtFOp::verify() {
+@@ -1217,6 +1465,358 @@ OpFoldResult arith::FlushDenormalsOp::fold(FoldAdaptor adaptor) {
+       });
+ }
+ 
++//===----------------------------------------------------------------------===//
++// AddFOp / SubFOp / MulFOp / DivFOp (LLVM 20 print, elide roundingmode)
++//===----------------------------------------------------------------------===//
++
++::mlir::ParseResult AddFOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand lhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> lhsOperands(&lhsRawOperand, 1);  ::llvm::SMLoc lhsOperandsLoc;
++  (void)lhsOperandsLoc;
++  ::mlir::OpAsmParser::UnresolvedOperand rhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> rhsOperands(&rhsRawOperand, 1);  ::llvm::SMLoc rhsOperandsLoc;
++  (void)rhsOperandsLoc;
++  ::mlir::arith::FastMathFlagsAttr fastmathAttr;
++  ::mlir::Type resultRawType{};
++  ::llvm::ArrayRef<::mlir::Type> resultTypes(&resultRawType, 1);
++
++  lhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(lhsRawOperand))
++    return ::mlir::failure();
++  if (parser.parseComma())
++    return ::mlir::failure();
++
++  rhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(rhsRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional roundingmode keyword (LLVM 20 text).
++  if (::mlir::succeeded(parser.parseOptionalKeyword("fastmath"))) {
++    if (parser.parseCustomAttributeWithFallback(fastmathAttr, ::mlir::Type{}))
++      return ::mlir::failure();
++    if (fastmathAttr)
++      result.getOrAddProperties<AddFOp::Properties>().fastmath = fastmathAttr;
++  }
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    resultRawType = type;
++  }
++  result.addTypes(resultTypes);
++  if (parser.resolveOperands(lhsOperands, resultTypes[0], lhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  if (parser.resolveOperands(rhsOperands, resultTypes[0], rhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void AddFOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getLhs();
++  _odsPrinter << ",";
++  _odsPrinter << ' ';
++  _odsPrinter << getRhs();
++  if (getFastmathAttr() != ::mlir::arith::FastMathFlagsAttr::get(
++          ::mlir::OpBuilder((*this)->getContext()).getContext(),
++          ::mlir::arith::FastMathFlags::none)) {
++    _odsPrinter << ' ' << "fastmath";
++    _odsPrinter.printStrippedAttrOrType(getFastmathAttr());
++  }
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("fastmath");
++  elidedAttrs.push_back("roundingmode");
++  {
++    ::mlir::Builder odsBuilder(getContext());
++    ::mlir::Attribute attr = getFastmathAttr();
++    if (attr && (attr == ::mlir::arith::FastMathFlagsAttr::get(
++                     odsBuilder.getContext(), ::mlir::arith::FastMathFlags::none)))
++      elidedAttrs.push_back("fastmath");
++  }
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getResult().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
++::mlir::ParseResult SubFOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand lhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> lhsOperands(&lhsRawOperand, 1);  ::llvm::SMLoc lhsOperandsLoc;
++  (void)lhsOperandsLoc;
++  ::mlir::OpAsmParser::UnresolvedOperand rhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> rhsOperands(&rhsRawOperand, 1);  ::llvm::SMLoc rhsOperandsLoc;
++  (void)rhsOperandsLoc;
++  ::mlir::arith::FastMathFlagsAttr fastmathAttr;
++  ::mlir::Type resultRawType{};
++  ::llvm::ArrayRef<::mlir::Type> resultTypes(&resultRawType, 1);
++
++  lhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(lhsRawOperand))
++    return ::mlir::failure();
++  if (parser.parseComma())
++    return ::mlir::failure();
++
++  rhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(rhsRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional roundingmode keyword (LLVM 20 text).
++  if (::mlir::succeeded(parser.parseOptionalKeyword("fastmath"))) {
++    if (parser.parseCustomAttributeWithFallback(fastmathAttr, ::mlir::Type{}))
++      return ::mlir::failure();
++    if (fastmathAttr)
++      result.getOrAddProperties<SubFOp::Properties>().fastmath = fastmathAttr;
++  }
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    resultRawType = type;
++  }
++  result.addTypes(resultTypes);
++  if (parser.resolveOperands(lhsOperands, resultTypes[0], lhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  if (parser.resolveOperands(rhsOperands, resultTypes[0], rhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void SubFOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getLhs();
++  _odsPrinter << ",";
++  _odsPrinter << ' ';
++  _odsPrinter << getRhs();
++  if (getFastmathAttr() != ::mlir::arith::FastMathFlagsAttr::get(
++          ::mlir::OpBuilder((*this)->getContext()).getContext(),
++          ::mlir::arith::FastMathFlags::none)) {
++    _odsPrinter << ' ' << "fastmath";
++    _odsPrinter.printStrippedAttrOrType(getFastmathAttr());
++  }
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("fastmath");
++  elidedAttrs.push_back("roundingmode");
++  {
++    ::mlir::Builder odsBuilder(getContext());
++    ::mlir::Attribute attr = getFastmathAttr();
++    if (attr && (attr == ::mlir::arith::FastMathFlagsAttr::get(
++                     odsBuilder.getContext(), ::mlir::arith::FastMathFlags::none)))
++      elidedAttrs.push_back("fastmath");
++  }
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getResult().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
++::mlir::ParseResult MulFOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand lhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> lhsOperands(&lhsRawOperand, 1);  ::llvm::SMLoc lhsOperandsLoc;
++  (void)lhsOperandsLoc;
++  ::mlir::OpAsmParser::UnresolvedOperand rhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> rhsOperands(&rhsRawOperand, 1);  ::llvm::SMLoc rhsOperandsLoc;
++  (void)rhsOperandsLoc;
++  ::mlir::arith::FastMathFlagsAttr fastmathAttr;
++  ::mlir::Type resultRawType{};
++  ::llvm::ArrayRef<::mlir::Type> resultTypes(&resultRawType, 1);
++
++  lhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(lhsRawOperand))
++    return ::mlir::failure();
++  if (parser.parseComma())
++    return ::mlir::failure();
++
++  rhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(rhsRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional roundingmode keyword (LLVM 20 text).
++  if (::mlir::succeeded(parser.parseOptionalKeyword("fastmath"))) {
++    if (parser.parseCustomAttributeWithFallback(fastmathAttr, ::mlir::Type{}))
++      return ::mlir::failure();
++    if (fastmathAttr)
++      result.getOrAddProperties<MulFOp::Properties>().fastmath = fastmathAttr;
++  }
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    resultRawType = type;
++  }
++  result.addTypes(resultTypes);
++  if (parser.resolveOperands(lhsOperands, resultTypes[0], lhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  if (parser.resolveOperands(rhsOperands, resultTypes[0], rhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void MulFOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getLhs();
++  _odsPrinter << ",";
++  _odsPrinter << ' ';
++  _odsPrinter << getRhs();
++  if (getFastmathAttr() != ::mlir::arith::FastMathFlagsAttr::get(
++          ::mlir::OpBuilder((*this)->getContext()).getContext(),
++          ::mlir::arith::FastMathFlags::none)) {
++    _odsPrinter << ' ' << "fastmath";
++    _odsPrinter.printStrippedAttrOrType(getFastmathAttr());
++  }
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("fastmath");
++  elidedAttrs.push_back("roundingmode");
++  {
++    ::mlir::Builder odsBuilder(getContext());
++    ::mlir::Attribute attr = getFastmathAttr();
++    if (attr && (attr == ::mlir::arith::FastMathFlagsAttr::get(
++                     odsBuilder.getContext(), ::mlir::arith::FastMathFlags::none)))
++      elidedAttrs.push_back("fastmath");
++  }
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getResult().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
++::mlir::ParseResult DivFOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand lhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> lhsOperands(&lhsRawOperand, 1);  ::llvm::SMLoc lhsOperandsLoc;
++  (void)lhsOperandsLoc;
++  ::mlir::OpAsmParser::UnresolvedOperand rhsRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> rhsOperands(&rhsRawOperand, 1);  ::llvm::SMLoc rhsOperandsLoc;
++  (void)rhsOperandsLoc;
++  ::mlir::arith::FastMathFlagsAttr fastmathAttr;
++  ::mlir::Type resultRawType{};
++  ::llvm::ArrayRef<::mlir::Type> resultTypes(&resultRawType, 1);
++
++  lhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(lhsRawOperand))
++    return ::mlir::failure();
++  if (parser.parseComma())
++    return ::mlir::failure();
++
++  rhsOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(rhsRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional roundingmode keyword (LLVM 20 text).
++  if (::mlir::succeeded(parser.parseOptionalKeyword("fastmath"))) {
++    if (parser.parseCustomAttributeWithFallback(fastmathAttr, ::mlir::Type{}))
++      return ::mlir::failure();
++    if (fastmathAttr)
++      result.getOrAddProperties<DivFOp::Properties>().fastmath = fastmathAttr;
++  }
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    resultRawType = type;
++  }
++  result.addTypes(resultTypes);
++  if (parser.resolveOperands(lhsOperands, resultTypes[0], lhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  if (parser.resolveOperands(rhsOperands, resultTypes[0], rhsOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void DivFOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getLhs();
++  _odsPrinter << ",";
++  _odsPrinter << ' ';
++  _odsPrinter << getRhs();
++  if (getFastmathAttr() != ::mlir::arith::FastMathFlagsAttr::get(
++          ::mlir::OpBuilder((*this)->getContext()).getContext(),
++          ::mlir::arith::FastMathFlags::none)) {
++    _odsPrinter << ' ' << "fastmath";
++    _odsPrinter.printStrippedAttrOrType(getFastmathAttr());
++  }
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("fastmath");
++  elidedAttrs.push_back("roundingmode");
++  {
++    ::mlir::Builder odsBuilder(getContext());
++    ::mlir::Attribute attr = getFastmathAttr();
++    if (attr && (attr == ::mlir::arith::FastMathFlagsAttr::get(
++                     odsBuilder.getContext(), ::mlir::arith::FastMathFlags::none)))
++      elidedAttrs.push_back("fastmath");
++  }
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getResult().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
+ //===----------------------------------------------------------------------===//
+ // AddFOp
+ //===----------------------------------------------------------------------===//
+@@ -1610,6 +2210,82 @@ convertFloatValue(APFloat sourceValue,
+   return sourceValue;
+ }
+ 
++//===----------------------------------------------------------------------===//
++// ExtUIOp (LLVM 20 print, elide nonNeg / nneg)
++//===----------------------------------------------------------------------===//
++
++::mlir::ParseResult ExtUIOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand inRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> inOperands(&inRawOperand, 1);  ::llvm::SMLoc inOperandsLoc;
++  (void)inOperandsLoc;
++  ::mlir::Type inRawType{};
++  ::llvm::ArrayRef<::mlir::Type> inTypes(&inRawType, 1);
++  ::mlir::Type outRawType{};
++  ::llvm::ArrayRef<::mlir::Type> outTypes(&outRawType, 1);
++
++  inOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(inRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional nneg keyword (LLVM 20 text).
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    inRawType = type;
++  }
++  if (parser.parseKeyword("to"))
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    outRawType = type;
++  }
++  result.addTypes(outTypes);
++  if (parser.resolveOperands(inOperands, inTypes, inOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void ExtUIOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getIn();
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("nonNeg");
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getIn().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++  _odsPrinter << ' ' << "to";
++  _odsPrinter << ' ';
++  {
++    auto type = getOut().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
+ //===----------------------------------------------------------------------===//
+ // ExtUIOp
+ //===----------------------------------------------------------------------===//
+@@ -1729,6 +2405,83 @@ LogicalResult arith::ScalingExtFOp::verify() {
  // TruncIOp
  //===----------------------------------------------------------------------===//
  
@@ -613,11 +1107,177 @@ index 83b3cec8d41a..fb2a0909f73e 100644
  OpFoldResult arith::TruncIOp::fold(FoldAdaptor adaptor) {
    if (matchPattern(getOperand(), m_Op<arith::ExtUIOp>()) ||
        matchPattern(getOperand(), m_Op<arith::ExtSIOp>())) {
+@@ -1930,6 +2683,82 @@ static bool checkIntFloatCast(TypeRange inputs, TypeRange outputs) {
+   return srcType && dstType;
+ }
+ 
++//===----------------------------------------------------------------------===//
++// UIToFPOp (LLVM 20 print, elide nonNeg / nneg)
++//===----------------------------------------------------------------------===//
++
++::mlir::ParseResult UIToFPOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand inRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> inOperands(&inRawOperand, 1);  ::llvm::SMLoc inOperandsLoc;
++  (void)inOperandsLoc;
++  ::mlir::Type inRawType{};
++  ::llvm::ArrayRef<::mlir::Type> inTypes(&inRawType, 1);
++  ::mlir::Type outRawType{};
++  ::llvm::ArrayRef<::mlir::Type> outTypes(&outRawType, 1);
++
++  inOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(inRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional nneg keyword (LLVM 20 text).
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    inRawType = type;
++  }
++  if (parser.parseKeyword("to"))
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    outRawType = type;
++  }
++  result.addTypes(outTypes);
++  if (parser.resolveOperands(inOperands, inTypes, inOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void UIToFPOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getIn();
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("nonNeg");
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getIn().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++  _odsPrinter << ' ' << "to";
++  _odsPrinter << ' ';
++  {
++    auto type = getOut().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
+ //===----------------------------------------------------------------------===//
+ // UIToFPOp
+ //===----------------------------------------------------------------------===//
+@@ -2090,6 +2919,82 @@ void arith::IndexCastOp::getCanonicalizationPatterns(
+   patterns.add<IndexCastOfExtSI>(context);
+ }
+ 
++//===----------------------------------------------------------------------===//
++// IndexCastUIOp (LLVM 20 print, elide nonNeg / nneg)
++//===----------------------------------------------------------------------===//
++
++::mlir::ParseResult IndexCastUIOp::parse(::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
++  ::mlir::OpAsmParser::UnresolvedOperand inRawOperand{};
++  ::llvm::ArrayRef<::mlir::OpAsmParser::UnresolvedOperand> inOperands(&inRawOperand, 1);  ::llvm::SMLoc inOperandsLoc;
++  (void)inOperandsLoc;
++  ::mlir::Type inRawType{};
++  ::llvm::ArrayRef<::mlir::Type> inTypes(&inRawType, 1);
++  ::mlir::Type outRawType{};
++  ::llvm::ArrayRef<::mlir::Type> outTypes(&outRawType, 1);
++
++  inOperandsLoc = parser.getCurrentLocation();
++  if (parser.parseOperand(inRawOperand))
++    return ::mlir::failure();
++  // Intentionally ignore optional nneg keyword (LLVM 20 text).
++  {
++    auto loc = parser.getCurrentLocation();(void)loc;
++    if (parser.parseOptionalAttrDict(result.attributes))
++      return ::mlir::failure();
++    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
++        return parser.emitError(loc) << "'" << result.name.getStringRef() << "' op ";
++      })))
++      return ::mlir::failure();
++  }
++  if (parser.parseColon())
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    inRawType = type;
++  }
++  if (parser.parseKeyword("to"))
++    return ::mlir::failure();
++
++  {
++    ::mlir::Type type;
++    if (parser.parseCustomTypeWithFallback(type))
++      return ::mlir::failure();
++    outRawType = type;
++  }
++  result.addTypes(outTypes);
++  if (parser.resolveOperands(inOperands, inTypes, inOperandsLoc, result.operands))
++    return ::mlir::failure();
++  return ::mlir::success();
++}
++
++void IndexCastUIOp::print(::mlir::OpAsmPrinter &_odsPrinter) {
++  _odsPrinter << ' ';
++  _odsPrinter << getIn();
++  ::llvm::SmallVector<::llvm::StringRef, 2> elidedAttrs;
++  elidedAttrs.push_back("nonNeg");
++  _odsPrinter.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
++  _odsPrinter << ' ' << ":";
++  _odsPrinter << ' ';
++  {
++    auto type = getIn().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++  _odsPrinter << ' ' << "to";
++  _odsPrinter << ' ';
++  {
++    auto type = getOut().getType();
++    if (auto validType = ::llvm::dyn_cast<::mlir::Type>(type))
++      _odsPrinter.printStrippedAttrOrType(validType);
++    else
++      _odsPrinter << type;
++  }
++}
++
+ //===----------------------------------------------------------------------===//
+ // IndexCastUIOp
+ //===----------------------------------------------------------------------===//
 diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp b/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
-index 08319ef9df79..3dbc4773b681 100644
+index f77edf23d4bc..9df117aa37c0 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
 +++ b/mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
-@@ -659,7 +659,9 @@ bool AnalysisState::canOmitTensorCopy(OpOperand &opOperand) const {
+@@ -664,7 +664,9 @@ bool AnalysisState::canOmitTensorCopy(OpOperand &opOperand) const {
  }
  
  bool AnalysisState::isInPlace(OpOperand &opOperand) const {
@@ -629,7 +1289,7 @@ index 08319ef9df79..3dbc4773b681 100644
      return true;
  
 diff --git a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
-index 71ad8bbf91c3..0b1f66919cd5 100644
+index c525ec116f69..17c8dcf86e33 100644
 --- a/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
 +++ b/mlir/lib/Dialect/Bufferization/IR/BufferizationOps.cpp
 @@ -14,6 +14,7 @@
@@ -909,10 +1569,10 @@ index 71ad8bbf91c3..0b1f66919cd5 100644
  // TableGen'd op method definitions
  //===----------------------------------------------------------------------===//
 diff --git a/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp b/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp
-index d2078d8ab5ca..f95d30b74f3a 100644
+index 435c37bc95aa..1269ff04e5d1 100644
 --- a/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp
 +++ b/mlir/lib/Dialect/ControlFlow/IR/ControlFlowOps.cpp
-@@ -479,6 +479,114 @@ struct DropUnreachableCondBranch : public OpRewritePattern<CondBranchOp> {
+@@ -561,6 +561,114 @@ struct DropUnreachableCondBranch : public OpRewritePattern<CondBranchOp> {
  };
  } // namespace
  
@@ -1028,7 +1688,7 @@ index d2078d8ab5ca..f95d30b74f3a 100644
                                                 MLIRContext *context) {
    results.add<SimplifyConstCondBranchPred, SimplifyPassThroughCondBranch,
 diff --git a/mlir/lib/Dialect/Func/IR/FuncOps.cpp b/mlir/lib/Dialect/Func/IR/FuncOps.cpp
-index 0e0863be9b47..2afc4a3a971c 100644
+index d803e9915449..0be1f5822e77 100644
 --- a/mlir/lib/Dialect/Func/IR/FuncOps.cpp
 +++ b/mlir/lib/Dialect/Func/IR/FuncOps.cpp
 @@ -60,6 +60,66 @@ Operation *FuncDialect::materializeConstant(OpBuilder &builder, Attribute value,
@@ -1099,10 +1759,10 @@ index 0e0863be9b47..2afc4a3a971c 100644
    // Check that the callee attribute was specified.
    auto fnAttr = (*this)->getAttrOfType<FlatSymbolRefAttr>("callee");
 diff --git a/mlir/lib/Dialect/GPU/IR/GPUDialect.cpp b/mlir/lib/Dialect/GPU/IR/GPUDialect.cpp
-index 8bd508b364e3..a525a4418d66 100644
+index d19f67af495f..5bfc145b64af 100644
 --- a/mlir/lib/Dialect/GPU/IR/GPUDialect.cpp
 +++ b/mlir/lib/Dialect/GPU/IR/GPUDialect.cpp
-@@ -1508,6 +1508,15 @@ static LogicalResult eraseRedundantGpuBarrierOps(BarrierOp op,
+@@ -1576,6 +1576,16 @@ static LogicalResult eraseRedundantGpuBarrierOps(BarrierOp op,
    return success();
  }
  
@@ -1111,15 +1771,16 @@ index 8bd508b364e3..a525a4418d66 100644
 +}
 +
 +void BarrierOp::print(OpAsmPrinter &p) {
++  // LLVM 20: bare attr-dict. Force-elide 3.7/3.8 extras (incl. default scope).
 +  p.printOptionalAttrDict((*this)->getAttrs(),
-+                          /*elidedAttrs=*/{"address_spaces"});
++                          /*elidedAttrs=*/{"address_spaces", "scope"});
 +}
 +
  void BarrierOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                              MLIRContext *context) {
    results.add(eraseRedundantGpuBarrierOps);
 diff --git a/mlir/lib/Dialect/LLVMIR/IR/LLVMDialect.cpp b/mlir/lib/Dialect/LLVMIR/IR/LLVMDialect.cpp
-index 41c6b43473aa..d8cbb1992848 100644
+index 63bd9f8a3d62..18d25a8f424a 100644
 --- a/mlir/lib/Dialect/LLVMIR/IR/LLVMDialect.cpp
 +++ b/mlir/lib/Dialect/LLVMIR/IR/LLVMDialect.cpp
 @@ -834,6 +834,172 @@ LogicalResult LLVM::GEPOp::verify() {
@@ -1467,7 +2128,7 @@ index 41c6b43473aa..d8cbb1992848 100644
  
  void StoreOp::getEffects(
      SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-@@ -4351,6 +4682,230 @@ LogicalResult InlineAsmOp::verify() {
+@@ -4425,6 +4756,230 @@ LogicalResult InlineAsmOp::verify() {
    return success();
  }
  
@@ -1699,10 +2360,10 @@ index 41c6b43473aa..d8cbb1992848 100644
  // UDivOp
  //===----------------------------------------------------------------------===//
 diff --git a/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp b/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp
-index eba3fa6db212..fc52524001af 100644
+index de7f4d1610bd..e74d578d5fc6 100644
 --- a/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp
 +++ b/mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp
-@@ -1660,10 +1660,15 @@ void MapOp::print(OpAsmPrinter &p) {
+@@ -1670,10 +1670,15 @@ void MapOp::print(OpAsmPrinter &p) {
  
    if (!useShortForm) {
      // Print region if the payload op was not detected.
@@ -1719,7 +2380,7 @@ index eba3fa6db212..fc52524001af 100644
                            [&](auto arg) { p.printRegionArgument(arg); });
      p << ") ";
  
-@@ -3919,33 +3924,14 @@ static FailureOr<ArrayAttr> parseIndexingMapsAttr(OpAsmParser &parser) {
+@@ -4000,33 +4005,14 @@ static FailureOr<ArrayAttr> parseIndexingMapsAttr(OpAsmParser &parser) {
  }
  
  ParseResult MatmulOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -1759,7 +2420,7 @@ index eba3fa6db212..fc52524001af 100644
  }
  
  /// Verify the user defined indexing maps.
-@@ -4699,11 +4685,10 @@ void BatchMatmulOp::print(OpAsmPrinter &p) {
+@@ -4785,11 +4771,10 @@ void BatchMatmulOp::print(OpAsmPrinter &p) {
    SmallVector<Attribute, 3> indexingMaps = llvm::map_to_vector<3>(
        BatchMatmulOp::getDefaultIndexingMaps(getContext()),
        [](AffineMap map) -> Attribute { return AffineMapAttr::get(map); });
@@ -1774,10 +2435,10 @@ index eba3fa6db212..fc52524001af 100644
                             elidedAttrs);
  }
 diff --git a/mlir/lib/Dialect/SCF/IR/SCF.cpp b/mlir/lib/Dialect/SCF/IR/SCF.cpp
-index c46a0577c4b9..dc1ba567e4a8 100644
+index 9f4f4dc9f58e..71560f9e5ba8 100644
 --- a/mlir/lib/Dialect/SCF/IR/SCF.cpp
 +++ b/mlir/lib/Dialect/SCF/IR/SCF.cpp
-@@ -494,9 +494,6 @@ static void printInitializationList(OpAsmPrinter &p,
+@@ -510,9 +510,6 @@ static void printInitializationList(OpAsmPrinter &p,
  }
  
  void ForOp::print(OpAsmPrinter &p) {
@@ -1788,10 +2449,10 @@ index c46a0577c4b9..dc1ba567e4a8 100644
      << getUpperBound() << " step " << getStep();
  
 diff --git a/mlir/lib/IR/AsmPrinter.cpp b/mlir/lib/IR/AsmPrinter.cpp
-index 81455699421c..0c2e4c462753 100644
+index ec270db18908..2a7b9f599471 100644
 --- a/mlir/lib/IR/AsmPrinter.cpp
 +++ b/mlir/lib/IR/AsmPrinter.cpp
-@@ -3769,9 +3769,17 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
+@@ -3814,9 +3814,17 @@ void OperationPrinter::printGenericOp(Operation *op, bool printOpName) {
  
    // Print the properties.
    if (Attribute prop = op->getPropertiesAsAttribute()) {
