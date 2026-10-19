@@ -221,8 +221,8 @@ def _apply_npuir_patch():
 
 def _apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
-    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
-    patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
+    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.8.0.patch")
+    patch = os.path.join(patch_path, "triton-ascend-3.8.0.patch")
     if _is_dev_mode() and os.path.isfile(dev_patch):
         dev_patch_files = _get_patch_files(dev_patch)
         if dev_patch_files:
