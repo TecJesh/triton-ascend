@@ -16,11 +16,7 @@ All Ascend-specific behavior stays isolated under ``third_party/ascend/build``;
 """
 
 import glob
-<<<<<<< HEAD:setup_ascend.py
-import importlib.util
 import json
-=======
->>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
 import os
 import platform
 import shutil
@@ -107,16 +103,11 @@ def _get_ascend_llvm_package_info(base_dir):
     else:
         return None
 
-<<<<<<< HEAD:setup_ascend.py
-    # Upstream replaced cmake/llvm-hash.txt with cmake/llvm-info.json.
-    llvm_info_path = base_dir / "cmake" / "llvm-info.json"
+    # Upstream 3.8 replaced cmake/llvm-hash.txt with cmake/llvm-info.json.
+    llvm_info_path = Path(base_dir) / "cmake" / "llvm-info.json"
     with open(llvm_info_path, "r") as llvm_info_file:
         llvm_info = json.load(llvm_info_file)
     rev = llvm_info["llvm_hash"][:8]
-=======
-    llvm_hash_path = Path(base_dir) / "cmake" / "llvm-hash.txt"
-    rev = llvm_hash_path.read_text()[:8]
->>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
@@ -206,7 +197,6 @@ def _get_patch_files(patch_path):
     return files
 
 
-<<<<<<< HEAD:setup_ascend.py
 def _normalize_crlf(files, *, cwd=None):
     """Convert CRLF line endings to LF in *files* (in-place).
 
@@ -222,15 +212,15 @@ def _normalize_crlf(files, *, cwd=None):
         data = path.read_bytes()
         if b"\r\n" in data:
             path.write_bytes(data.replace(b"\r\n", b"\n"))
-=======
+
+
 def get_triton_ascend_patch_file():
     patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
-    dev_patch = patch_dir / "triton-ascend-dev-3.7.0.patch"
-    patch = patch_dir / "triton-ascend-3.7.0.patch"
+    dev_patch = patch_dir / "triton-ascend-dev-3.8.0.patch"
+    patch = patch_dir / "triton-ascend-3.8.0.patch"
     dev_patch_files = _get_patch_files(dev_patch) if dev_patch.is_file() else []
     patch_files = _get_patch_files(patch) if patch.is_file() else []
     return patch_files, dev_patch_files
->>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
 
 
 def _apply_npuir_patch():
@@ -244,7 +234,6 @@ def _apply_npuir_patch():
     patch_files = _get_patch_files(patch_path)
     if not patch_files:
         raise RuntimeError(f"patch({patch_path}) has no file sections.")
-<<<<<<< HEAD:setup_ascend.py
     # Restore only files tracked at HEAD; new-file sections are created
     # fresh by `git apply` and have nothing to check out.
     tracked = subprocess.run(
@@ -255,11 +244,8 @@ def _apply_npuir_patch():
         cwd=npuir_dir,
         text=True,
     ).stdout.splitlines()
-    _checkout_file(tracked, cwd=npuir_dir)
+    checkout_file(tracked, cwd=npuir_dir)
     _normalize_crlf(tracked, cwd=npuir_dir)
-=======
-    checkout_file(patch_files, cwd=npuir_dir)
->>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
     _apply_patch(patch_path, directory=npuir_dir)
 
 
@@ -551,16 +537,11 @@ def patch_module(mod):
     ascend_backend = mod.BackendInstaller.prepare("ascend")
     mod.backends = [ascend_backend, *mod.backends]
 
-<<<<<<< HEAD:setup_ascend.py
-    # 2. Replace LLVM package info with Ascend build.  Upstream moved
-    #    Package/get_llvm_package_info from setup.py into python/build_helpers.py
-    #    (new signature: get_llvm_package_info(helper_args)), so patch the
-    #    build_helpers module instead of the setup module.
-    _orig_get_llvm_package_info = build_helpers.get_llvm_package_info
-=======
     # 2. Replace LLVM package info with the Ascend pre-built LLVM.
-    _orig_get_llvm_package_info = mod.get_llvm_package_info
->>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
+    #    Upstream 3.8 moved Package/get_llvm_package_info into
+    #    python/build_helpers.py (signature: get_llvm_package_info(helper_args)),
+    #    so patch that module instead of the setup module.
+    _orig_get_llvm_package_info = build_helpers.get_llvm_package_info
 
     def get_llvm_package_info(helper_args):
         info = _get_ascend_llvm_package_info(Path(mod.get_base_dir()))

@@ -37,15 +37,11 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-<<<<<<< HEAD
-from python.build_helpers import check_env_flag, get_base_dir, get_cmake_dir
-=======
 from third_party.ascend.build import prepare as _ascend_prepare
 
 _ascend_prepare()
 
-from python.build_helpers import get_base_dir, get_cmake_dir
->>>>>>> upstream/dev/main-upgrade-3.7
+from python.build_helpers import check_env_flag, get_base_dir, get_cmake_dir
 
 
 def is_git_repo() -> bool:
