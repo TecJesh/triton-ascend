@@ -12,7 +12,7 @@ This document uses the online installation and running of the vector addition ex
 
 Supported operating systems: Linux (aarch64/x86_64)
 
-Supported Ascend products: Atlas A2/A3/950 series
+Supported Ascend products: Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products
 
 Minimum hardware configuration: 32 GB memory per card (recommended)
 
@@ -20,9 +20,9 @@ Minimum hardware configuration: 32 GB memory per card (recommended)
 
 Determine and install the CANN, Python, and TorchNPU software versions. For the driver and firmware installation, you can refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the Ascend community official website.
 
-- CANN version: 9.1.0
+- CANN version: 9.2.0
 - Python version: python3.11
-- TorchNPU version: 2.7.1.post8
+- TorchNPU version: 2.10.0.post7
 
 Note: For more compatibility relationships, please refer to the [Version Description Table](./release_note.md#version-compatibility-matrix).
 

@@ -10,7 +10,7 @@ import torch
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
-                  "only runs on Ascend 950 with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+                  "only runs on Ascend 950PR&950DT products with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 
 @triton.jit
@@ -40,7 +40,7 @@ def test_fmod():
 
     torch_res = torch_res.cpu()
     triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":

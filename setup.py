@@ -37,7 +37,15 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+<<<<<<< HEAD
 from python.build_helpers import check_env_flag, get_base_dir, get_cmake_dir
+=======
+from third_party.ascend.build import prepare as _ascend_prepare
+
+_ascend_prepare()
+
+from python.build_helpers import get_base_dir, get_cmake_dir
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 
 def is_git_repo() -> bool:
@@ -578,6 +586,10 @@ PYTHON_CLASSIFIERS = [
     f"Programming Language :: Python :: {MIN_PYTHON[0]}.{m}" for m in range(MIN_PYTHON[1], MAX_PYTHON[1] + 1)
 ]
 CLASSIFIERS = BASE_CLASSIFIERS + PYTHON_CLASSIFIERS
+
+from third_party.ascend.build import activate as _ascend_activate
+
+_ascend_activate()
 
 setup(
     name=os.environ.get("TRITON_WHEEL_NAME", "triton"),

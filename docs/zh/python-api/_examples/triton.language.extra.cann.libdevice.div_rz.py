@@ -11,7 +11,7 @@ import torch
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
-                  "only runs on Ascend 950 with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+                  "only runs on Ascend 950PR&950DT products with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 
 @triton.jit
@@ -40,7 +40,7 @@ def test_div_rz():
     expected = x0 / x1
     out = out.cpu()
     expected = expected.cpu()
-    torch.testing.assert_close(out, expected, rtol=1e-03, atol=1e-03)
+    torch.testing.assert_close(out, expected, rtol=1e-04, atol=1e-04)
 
 
 if __name__ == "__main__":

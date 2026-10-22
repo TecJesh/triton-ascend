@@ -1,9 +1,28 @@
+"""Ascend-specific overrides for the in-tree ``setup.py``.
+
+Unlike the previous ``setup_ascend.py`` (which imported ``setup.py`` out of
+process via importlib and re-ran ``setup()``), these hooks run inside
+``setup.py`` itself:
+
+* :func:`prepare` is called once near the top of ``setup.py`` and sets up
+  default build environment variables / fetches optional submodules.
+* :func:`activate` is called right before the community ``setup(...)`` call.
+  It rebinds the ``setup`` name in ``setup.py``'s globals to a wrapper which
+  patches the setup module's globals and rewrites the keyword arguments, then
+  delegates to the real ``setuptools.setup()``.
+
+All Ascend-specific behavior stays isolated under ``third_party/ascend/build``;
+``setup.py`` only carries two tiny hook calls.
+"""
+
 import glob
+<<<<<<< HEAD:setup_ascend.py
 import importlib.util
 import json
+=======
+>>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
 import os
 import platform
-import re
 import shutil
 import subprocess
 import sys
@@ -17,8 +36,12 @@ try:
 except ImportError:
     from wheel.bdist_wheel import bdist_wheel
 
+from .build_npuir import build_npuir
+
 _THIS_DIR = Path(__file__).resolve().parent
-_TRITON_SETUP = _THIS_DIR / "setup.py"
+_REPO_ROOT = _THIS_DIR.parents[2]
+
+_BISHENGIR_PAYLOAD_ENV = "TRITON_ASCEND_BISHENGIR_PATH"
 
 
 def _set_default_env_vars():
@@ -26,12 +49,13 @@ def _set_default_env_vars():
     os.environ.setdefault("TRITON_BUILD_WITH_CLANG_LLD", "true")
     os.environ.setdefault("TRITON_BUILD_PROTON", "OFF")
     os.environ.setdefault("TRITON_BUILD_TD", "OFF")
+    os.environ.setdefault("TRITON_BUILD_NPUIR", "OFF")
     os.environ.setdefault("TRITON_WHEEL_NAME", "triton_ascend")
     os.environ.setdefault("TRITON_APPEND_CMAKE_ARGS", "-DTRITON_BUILD_UT=OFF")
 
 
 def _is_git_repo():
-    return (_THIS_DIR / ".git").is_dir()
+    return (_REPO_ROOT / ".git").is_dir()
 
 
 def _is_linux_os(os_id):
@@ -42,7 +66,7 @@ def _is_linux_os(os_id):
 
 
 def _get_llvm_patch_hash():
-    patch_dir = _THIS_DIR / "third_party" / "ascend" / "patch"
+    patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
     if patch_dir.is_dir():
         patch_files = sorted(f for f in os.listdir(patch_dir)
                              if f.startswith("llvm_patch_") and f.endswith(".patch") and (patch_dir / f).is_file())
@@ -83,11 +107,16 @@ def _get_ascend_llvm_package_info(base_dir):
     else:
         return None
 
+<<<<<<< HEAD:setup_ascend.py
     # Upstream replaced cmake/llvm-hash.txt with cmake/llvm-info.json.
     llvm_info_path = base_dir / "cmake" / "llvm-info.json"
     with open(llvm_info_path, "r") as llvm_info_file:
         llvm_info = json.load(llvm_info_file)
     rev = llvm_info["llvm_hash"][:8]
+=======
+    llvm_hash_path = Path(base_dir) / "cmake" / "llvm-hash.txt"
+    rev = llvm_hash_path.read_text()[:8]
+>>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
@@ -137,19 +166,19 @@ def _apply_patch(patch_path, *, directory=None, cwd=None):
         cmd.extend(["--directory", directory])
     cmd.append(patch_path)
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd or _THIS_DIR))
-    except subprocess.CalledProcessError:
-        raise RuntimeError(f"patch({patch_path}) failed")
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd or _REPO_ROOT))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
 
 
-def _checkout_file(files, *, cwd=None):
+def checkout_file(files, *, cwd=None):
     try:
         subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd
-                                                                                                         or _THIS_DIR))
-    except subprocess.CalledProcessError:
-        raise RuntimeError(f"init code failed, list:{files}")
+                                                                                                         or _REPO_ROOT))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"restore sources failed, list:{files}, cmd={e.cmd}, retcode={e.returncode}") from e
 
 
 def _is_dev_mode():
@@ -159,13 +188,14 @@ def _is_dev_mode():
         return True
     if "dev" in _get_default_version():
         return True
+    return False
 
 
 def _get_patch_files(patch_path):
     """Return repo-relative paths listed in a unified diff."""
     path = Path(patch_path)
     if not path.is_absolute():
-        path = _THIS_DIR / path
+        path = _REPO_ROOT / path
     files = []
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -176,6 +206,7 @@ def _get_patch_files(patch_path):
     return files
 
 
+<<<<<<< HEAD:setup_ascend.py
 def _normalize_crlf(files, *, cwd=None):
     """Convert CRLF line endings to LF in *files* (in-place).
 
@@ -191,6 +222,15 @@ def _normalize_crlf(files, *, cwd=None):
         data = path.read_bytes()
         if b"\r\n" in data:
             path.write_bytes(data.replace(b"\r\n", b"\n"))
+=======
+def get_triton_ascend_patch_file():
+    patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
+    dev_patch = patch_dir / "triton-ascend-dev-3.7.0.patch"
+    patch = patch_dir / "triton-ascend-3.7.0.patch"
+    dev_patch_files = _get_patch_files(dev_patch) if dev_patch.is_file() else []
+    patch_files = _get_patch_files(patch) if patch.is_file() else []
+    return patch_files, dev_patch_files
+>>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
 
 
 def _apply_npuir_patch():
@@ -204,6 +244,7 @@ def _apply_npuir_patch():
     patch_files = _get_patch_files(patch_path)
     if not patch_files:
         raise RuntimeError(f"patch({patch_path}) has no file sections.")
+<<<<<<< HEAD:setup_ascend.py
     # Restore only files tracked at HEAD; new-file sections are created
     # fresh by `git apply` and have nothing to check out.
     tracked = subprocess.run(
@@ -216,6 +257,9 @@ def _apply_npuir_patch():
     ).stdout.splitlines()
     _checkout_file(tracked, cwd=npuir_dir)
     _normalize_crlf(tracked, cwd=npuir_dir)
+=======
+    checkout_file(patch_files, cwd=npuir_dir)
+>>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
     _apply_patch(patch_path, directory=npuir_dir)
 
 
@@ -226,13 +270,13 @@ def _apply_triton_ascend_patch():
     if _is_dev_mode() and os.path.isfile(dev_patch):
         dev_patch_files = _get_patch_files(dev_patch)
         if dev_patch_files:
-            _checkout_file(dev_patch_files)
+            checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
         patch_files = _get_patch_files(patch)
         if not patch_files:
             raise RuntimeError(f"patch({patch}) has no file sections.")
-        _checkout_file(patch_files)
+        checkout_file(patch_files)
         _apply_patch(str(patch))
     _apply_npuir_patch()
 
@@ -240,10 +284,10 @@ def _apply_triton_ascend_patch():
 def _print_patch_restore_warning():
     """Warn that the build left patched (dirty) source files in the worktree.
 
-    ``_apply_triton_ascend_patch`` modifies in-tree Triton sources, so a
+    ``apply_triton_ascend_patch`` modifies in-tree Triton sources, so a
     subsequent ``git pull`` would fail with local changes. Users can restore
-    those files with ``python3 init_code.py`` (which runs ``git checkout --``
-    on the patched file list).
+    those files with ``python3 restore_sources.py`` at the repository root
+    (which runs ``git checkout --`` on the patched file list).
     """
     if not _is_git_repo():
         return
@@ -260,13 +304,13 @@ def _print_patch_restore_warning():
     print("         will cause `git pull` to fail with local changes.")
     print("")
     print("         To restore the source files, run:")
-    print(f"            >>> {highlight}python3 init_code.py{reset} <<<")
+    print(f"            >>> {highlight}python3 restore_sources.py{reset} <<<")
     print("=" * 72)
     print("")
 
 
 def _get_default_version():
-    version_file = _THIS_DIR / "version.txt"
+    version_file = _REPO_ROOT / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
     # Fallback tracks the upstream Triton version (3.8.0 since this sync);
@@ -332,14 +376,14 @@ def _clean_hitest_env():
             del os.environ[key]
 
 
-def add_git_safe_dir(path: str):
+def _add_git_safe_dir(path: str):
     safe_dirs = subprocess.run([
         "git",
         "config",
         "--global",
         "--get-all",
         "safe.directory",
-    ], capture_output=True, text=True, cwd=_THIS_DIR).stdout.strip().splitlines()
+    ], capture_output=True, text=True, cwd=str(_REPO_ROOT)).stdout.strip().splitlines()
 
     if path not in safe_dirs:
         subprocess.check_call([
@@ -349,7 +393,7 @@ def add_git_safe_dir(path: str):
             "--add",
             "safe.directory",
             path,
-        ], cwd=_THIS_DIR)
+        ], cwd=str(_REPO_ROOT))
 
 
 def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
@@ -374,11 +418,17 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
     raise last_error
 
 
+def _ensure_npuir_submodule():
+    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+        return
+    build_npuir()
+
+
 def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
-    distributed_dir = _THIS_DIR / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "7786ae06d5cf16fc232d3ccfeb4a18f5d6a9e26e"
+    distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
+    commit_id = "8c1dae1acbb4bcf99c3e473c8ed876f2cd42ba35"
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([
@@ -387,7 +437,7 @@ def _ensure_distributed_submodule():
                 "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
                 "-b",
                 "master",
-            ], cwd=_THIS_DIR / "third_party" / "ascend")
+            ], cwd=_REPO_ROOT / "third_party" / "ascend")
         except Exception:
             # A clone interrupted by a network failure leaves a partially
             # populated directory; remove it so the next build retries cleanly.
@@ -395,7 +445,7 @@ def _ensure_distributed_submodule():
                 shutil.rmtree(distributed_dir, ignore_errors=True)
             raise
     if _is_git_repo():
-        add_git_safe_dir(str(distributed_dir))
+        _add_git_safe_dir(str(distributed_dir))
         _git_check_call_with_retry([
             "git",
             "fetch",
@@ -436,6 +486,36 @@ def _copy_ascend_tools(extdir, cmake_dir):
             print(f"Copied {name} to {dst}")
 
 
+def _get_bishengir_payload_source():
+    raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
+    if not raw_path:
+        return None
+
+    source = Path(raw_path).expanduser().resolve()
+    required_paths = [
+        source / "bin" / "bishengir-compile",
+        source / "bin" / "bishengir-opt",
+        source / "lib",
+    ]
+    if not source.is_dir() or any(not path.exists() for path in required_paths):
+        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+                           "bin/bishengir-compile, bin/bishengir-opt, and lib")
+    return source
+
+
+def _copy_bishengir_payload(build_lib):
+    source = _get_bishengir_payload_source()
+    if source is None:
+        return
+
+    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination, symlinks=True)
+    print(f"Bundled BishengIR payload from {source} into {destination}")
+
+
 def _get_ascend_cmake_args():
     cmake_args = []
     ascendnpu_ir_tag = os.getenv("ASCENDNPU_IR_TAG")
@@ -463,18 +543,24 @@ def _get_install_requirements():
     return [*install_requires]
 
 
-def _patch_module(mod):
-    """Apply all Ascend-specific overrides to the imported setup_triton module."""
+def patch_module(mod):
+    """Apply all Ascend-specific overrides to the setup.py globals adapter."""
 
-    # 1. Add "ascend" to the in-tree backends list.
+    # 1. Add "ascend" to the in-tree backends list. This also initializes the
+    #    in-tree backend layout (asserts third_party/ascend/backend exists).
     ascend_backend = mod.BackendInstaller.prepare("ascend")
     mod.backends = [ascend_backend, *mod.backends]
 
+<<<<<<< HEAD:setup_ascend.py
     # 2. Replace LLVM package info with Ascend build.  Upstream moved
     #    Package/get_llvm_package_info from setup.py into python/build_helpers.py
     #    (new signature: get_llvm_package_info(helper_args)), so patch the
     #    build_helpers module instead of the setup module.
     _orig_get_llvm_package_info = build_helpers.get_llvm_package_info
+=======
+    # 2. Replace LLVM package info with the Ascend pre-built LLVM.
+    _orig_get_llvm_package_info = mod.get_llvm_package_info
+>>>>>>> upstream/dev/main-upgrade-3.7:third_party/ascend/build/setup_patch.py
 
     def get_llvm_package_info(helper_args):
         info = _get_ascend_llvm_package_info(Path(mod.get_base_dir()))
@@ -492,24 +578,17 @@ def _patch_module(mod):
 
     build_helpers.get_llvm_package_info = get_llvm_package_info
 
-    # 3. Patch CMakeBuild to apply Ascend patch / coverage / tools.
+    # 3. Skip downloading NVIDIA proprietary toolchain dependencies
+    #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.
+    mod.download_and_copy_dependencies = lambda *args, **kwargs: None
+
+    # 4. Patch CMakeBuild to apply the Ascend patch / coverage / tools.
     _OrigCMakeBuild = mod.CMakeBuild
 
     class CMakeBuild(_OrigCMakeBuild):
 
         def run(self):
             _apply_triton_ascend_patch()
-
-            try:
-                out = subprocess.check_output(["cmake", "--version"])
-            except OSError:
-                raise RuntimeError("CMake must be installed to build the following extensions: " +
-                                   ", ".join(e.name for e in self.extensions))
-
-            match = re.search(r"version\s*(?P<major>\d+)\.(?P<minor>\d+)([\d.]+)?", out.decode())
-            cmake_major, cmake_minor = int(match.group("major")), int(match.group("minor"))
-            if (cmake_major, cmake_minor) < (3, 20):
-                raise RuntimeError("CMake >= 3.20 is required")
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \
                             in ("1", "on", "true")
@@ -525,8 +604,7 @@ def _patch_module(mod):
             else:
                 _clean_hitest_env()
 
-            for ext in self.extensions:
-                self.build_extension(ext)
+            super().run()
 
         def build_extension(self, ext):
             extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
@@ -584,7 +662,16 @@ def _patch_module(mod):
 
     mod.CMakeBuild = CMakeBuild
 
-    # 4. Replace BuildWheel (bdist_wheel) with Ascend auditwheel variant.
+    _OrigCMakeBuildPy = mod.CMakeBuildPy
+
+    class AscendBuildPy(_OrigCMakeBuildPy):
+
+        def run(self):
+            super().run()
+            _copy_bishengir_payload(self.build_lib)
+
+    mod.AscendBuildPy = AscendBuildPy
+
     is_manylinux = mod.check_env_flag("IS_MANYLINUX", "FALSE")
 
     class BuildWheel(bdist_wheel):
@@ -616,7 +703,6 @@ def _patch_module(mod):
 
     mod.BuildWheel = BuildWheel
 
-    # 5. Patch get_package_dirs to include distributed package.
     _orig_get_package_dirs = mod.get_package_dirs
 
     def get_package_dirs():
@@ -627,7 +713,6 @@ def _patch_module(mod):
 
     mod.get_package_dirs = get_package_dirs
 
-    # 6. Patch get_packages to include distributed subpackages.
     _orig_get_packages = mod.get_packages
 
     def get_packages():
@@ -646,16 +731,15 @@ def _patch_module(mod):
 
     mod.get_packages = get_packages
 
-    # 7. Patch add_links to include distributed symlink.
     _orig_add_links = mod.add_links
 
     def add_links(external_only):
         _orig_add_links(external_only)
         if not external_only and \
                 mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
-            distributed_dir = (_THIS_DIR / "third_party" / "ascend" / "Triton-distributed-ascend" / "python" /
+            distributed_dir = (_REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend" / "python" /
                                "triton_dist").resolve()
-            distributed_install_dir = _THIS_DIR / "python" / "triton_dist"
+            distributed_install_dir = _REPO_ROOT / "python" / "triton_dist"
             mod.update_symlink(distributed_install_dir, distributed_dir)
 
     mod.add_links = add_links
@@ -673,7 +757,7 @@ def _build_setup_kwargs(mod, kwargs):
     kwargs["url"] = "https://gitcode.com/Ascend/triton-ascend/"
 
     # README as long_description
-    readme = _THIS_DIR / "README.md"
+    readme = _REPO_ROOT / "README.md"
     if readme.exists():
         kwargs["long_description"] = readme.read_text(encoding="utf-8")
 
@@ -687,53 +771,73 @@ def _build_setup_kwargs(mod, kwargs):
     if package_data:
         kwargs["package_data"] = package_data
 
-    # cmdclass: replace bdist_wheel with BuildWheel, build_ext with CMakeBuild
     cmdclass = dict(kwargs.get("cmdclass") or {})
     cmdclass["bdist_wheel"] = mod.BuildWheel
     cmdclass["build_ext"] = mod.CMakeBuild
+    cmdclass["build_py"] = mod.AscendBuildPy
     kwargs["cmdclass"] = cmdclass
 
-    # packages / package_dir must be re-evaluated (they were computed with
-    # the original backends list before we patched it). Re-call the patched
-    # functions so ascend backend + distributed are included.
+    # packages / package_dir / entry_points were computed at setup() argument
+    # evaluation time using the original backends list; re-evaluate with the
+    # patched functions so the ascend backend (+ distributed) is included.
     kwargs["packages"] = list(mod.get_packages())
     kwargs["package_dir"] = dict(mod.get_package_dirs())
-
-    # Recompute entry_points so that the ascend backend entry is present.
     kwargs["entry_points"] = mod.get_entry_points()
 
     return kwargs
 
 
-def main():
+def prepare():
+    """Top-of-setup.py hook: defaults and optional submodules."""
     _set_default_env_vars()
+    _ensure_npuir_submodule()
     _ensure_distributed_submodule()
 
-    # Import the community setup_triton module without executing its setup()
-    # call. We do this by temporarily replacing setuptools.setup.
+
+def activate():
+    """Install the Ascend interceptor as the ``setup`` name in the calling
+    ``setup.py`` module globals.
+
+    Must be called at module level in ``setup.py`` immediately before its
+    ``setup(...)`` call. ``from setuptools import setup`` binds the name at
+    import time, so patching ``setuptools.setup`` alone would not intercept
+    the call; we therefore rebind the caller's global ``setup`` directly.
+    This works both for ``python setup.py`` and for PEP 517 builds that exec
+    ``setup.py`` with a fresh globals dict.
+    """
     import setuptools
-    _real_setup = setuptools.setup
-    captured = {}
 
-    def _capture_setup(**kwargs):
-        captured["kwargs"] = kwargs
+    caller_globals = sys._getframe(1).f_globals
+    current_setup = caller_globals.get("setup")
+    if getattr(current_setup, "_triton_ascend_wrapped", False):
+        return
 
-    setuptools.setup = _capture_setup
-    try:
-        spec = importlib.util.spec_from_file_location("setup", str(_TRITON_SETUP))
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["setup"] = mod
-        spec.loader.exec_module(mod)
-    finally:
-        setuptools.setup = _real_setup
+    real_setup = setuptools.setup
 
-    # Apply Ascend overrides to the module before invoking setup().
-    _patch_module(mod)
+    def _ascend_setup(**kwargs):
+        setup_globals = sys._getframe(1).f_globals
 
-    kwargs = _build_setup_kwargs(mod, captured["kwargs"])
-    _real_setup(**kwargs)
-    _print_patch_restore_warning()
+        class _ModuleGlobals:
 
+            def __getattr__(self, name):
+                try:
+                    return setup_globals[name]
+                except KeyError as e:
+                    raise AttributeError(name) from e
 
-if __name__ == "__main__":
-    main()
+            def __setattr__(self, name, value):
+                setup_globals[name] = value
+
+        mod = _ModuleGlobals()
+        patch_module(mod)
+        kwargs = _build_setup_kwargs(mod, kwargs)
+        dist = real_setup(**kwargs)
+        # distutils.core.run_setup() retrieves the distribution from the
+        # exec()'d globals under the name "dist".
+        setup_globals["dist"] = dist
+        _print_patch_restore_warning()
+        return dist
+
+    _ascend_setup._triton_ascend_wrapped = True
+    setuptools.setup = _ascend_setup
+    caller_globals["setup"] = _ascend_setup

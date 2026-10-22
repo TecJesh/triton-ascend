@@ -59,6 +59,7 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -70,6 +71,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -740,6 +742,38 @@ public:
   }
 };
 
+// Collect the ops in a scan body that actually contribute to the yielded
+// result: compute the backward slice from the terminator operands, then drop
+// pure type-cast ops. Mirrors ReductionOpBaseConverter::getRealReductionOps so
+// that auxiliary ops (e.g. the overflow asserts injected by TRITON_DEBUG)
+// never feed the yielded result and are ignored here as well.
+static llvm::SmallVector<Operation *> getRealScanBodyOps(triton::ScanOp op) {
+  Block *body = op.getBody();
+  Operation *terminator = body->getTerminator();
+
+  llvm::DenseSet<Operation *> liveOps;
+  llvm::SmallVector<Value> worklist(terminator->getOperands());
+  while (!worklist.empty()) {
+    Value val = worklist.pop_back_val();
+    if (auto *defOp = val.getDefiningOp()) {
+      if (defOp->getBlock() == body && liveOps.insert(defOp).second) {
+        for (auto operand : defOp->getOperands())
+          worklist.push_back(operand);
+      }
+    }
+  }
+
+  llvm::SmallVector<Operation *> realOps;
+  for (Operation &bodyOp : body->without_terminator()) {
+    if (!liveOps.contains(&bodyOp))
+      continue;
+    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
+      continue;
+    realOps.push_back(&bodyOp);
+  }
+  return realOps;
+}
+
 // A tt.scan that is (1) a plain cumsum (combine body is a single add, matching
 // ScanConverter's triton_cumsum selection) and (2) collapses to a 1-D scan
 // after backend lowering, i.e. every dim except the scan axis has extent 1
@@ -747,17 +781,11 @@ public:
 // (Sklansky) cumsum template; cumprod / generic scans and multi-dim cumsum stay
 // on SIMD.
 static bool isSimt1DCumsum(triton::ScanOp op) {
-  // (1) Must be a single-add combine body (skip pure type-cast ops, mirroring
-  // ReductionOpBaseConverter::getRealReductionOps).
-  Operation *reduceOp = nullptr;
-  for (Operation &bodyOp : op.getBody()->without_terminator()) {
-    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
-      continue;
-    if (reduceOp)
-      return false; // more than one real op -> not a simple cumsum
-    reduceOp = &bodyOp;
-  }
-  if (!reduceOp || !isa<arith::AddFOp, arith::AddIOp>(reduceOp))
+  // (1) Must be a single-add combine body (only ops that feed the yielded
+  // result count, mirroring getRealReductionOps).
+  llvm::SmallVector<Operation *> realOps = getRealScanBodyOps(op);
+  if (realOps.size() != 1 ||
+      !isa<arith::AddFOp, arith::AddIOp>(realOps.front()))
     return false;
 
   // (2) Must be the 1-D scenario: all non-scan dims are unit-sized.
@@ -809,10 +837,10 @@ static bool isSIMTOp(Operation *op) {
     }
   }
 
-  // math.sin / math.cos on f16/f32 inputs: downstream (A5 RegBase normalize,
-  // enable-high-precision defaults to true) rewrites them into a Payne-Hanek
-  // range reduction that looks up a 320xi32 2/pi limbs table with two
-  // hfusion.gather ops per collapsed region.  Match that scenario here and
+  // math.sin / math.cos on f16/f32 inputs: downstream (Ascend 950 RegBase
+  // normalize, enable-high-precision defaults to true) rewrites them into a
+  // Payne-Hanek range reduction that looks up a 320xi32 2/pi limbs table with
+  // two hfusion.gather ops per collapsed region.  Match that scenario here and
   // route it to the SIMT template so the table gathers run in SIMT.
   if (compileOn91095Flag && (isa<math::SinOp>(op) || isa<math::CosOp>(op))) {
     Type inElem = getElementTypeOrSelf(op->getOperand(0).getType());
@@ -1181,13 +1209,13 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
 
 void TritonToLinalgPass::addDynamicLegal(
     ConversionTarget &target, TritonTypeConverter &tritonTypeConverter) {
-  target.addLegalDialect<func::FuncDialect, arith::ArithDialect,
-                         math::MathDialect, linalg::LinalgDialect,
-                         affine::AffineDialect, scf::SCFDialect,
-                         cf::ControlFlowDialect, tensor::TensorDialect,
-                         LLVM::LLVMDialect, bufferization::BufferizationDialect,
-                         memref::MemRefDialect, annotation::AnnotationDialect,
-                         hivm::HIVMDialect, hfusion::HFusionDialect>();
+  target.addLegalDialect<
+      func::FuncDialect, arith::ArithDialect, math::MathDialect,
+      linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+      cf::ControlFlowDialect, tensor::TensorDialect, LLVM::LLVMDialect,
+      bufferization::BufferizationDialect, memref::MemRefDialect,
+      annotation::AnnotationDialect, hivm::HIVMDialect, hfusion::HFusionDialect,
+      scope::ScopeDialect>();
 
   // add legal dialect on condition
   target.addLegalOp<ModuleOp>();
@@ -1329,6 +1357,106 @@ public:
 };
 
 } // namespace
+
+// Version only the small, bufferized row-copy loops emitted for mixed-axis
+// loads. The column extent is shared by every row: checking it once outside
+// the loop lets full tiles recover a static copy while tails keep their mask.
+// Run after memory conversion so both branches use the same outer allocation.
+static void specializeFullRowCopies(ModuleOp moduleOp) {
+  SmallVector<scf::ForOp> loops;
+  moduleOp.walk([&](scf::ForOp loop) {
+    if (loop->hasAttr("ExtractedLoadOrStore") &&
+        loop->hasAttr("hivm.parallel_loop") && loop.getNumResults() == 0)
+      loops.push_back(loop);
+  });
+  IRRewriter rewriter(moduleOp.getContext());
+  for (scf::ForOp loop : loops) {
+    // Do not duplicate nested control flow, allocations, or other accesses.
+    memref::CopyOp copy;
+    bool supported = true;
+    unsigned numOps = 0;
+    for (Operation &op : loop.getBody()->without_terminator()) {
+      if (++numOps > 32 || op.getNumRegions() != 0) {
+        supported = false;
+        break;
+      }
+      if (auto candidate = dyn_cast<memref::CopyOp>(op)) {
+        if (copy) {
+          supported = false;
+          break;
+        }
+        copy = candidate;
+      } else if (!isMemoryEffectFree(&op)) {
+        supported = false;
+        break;
+      }
+    }
+    if (!supported || !copy)
+      continue;
+
+    auto src = copy.getSource().getDefiningOp<memref::SubViewOp>();
+    auto dst = copy.getTarget().getDefiningOp<memref::SubViewOp>();
+    if (!src || !dst || src.getSourceType().getRank() != 2 ||
+        dst.getSourceType().getRank() != 2 || src.getType().getRank() != 2 ||
+        dst.getType().getRank() != 2)
+      continue;
+    auto shape = src.getSourceType().getShape();
+    if (shape[0] != 1 || ShapedType::isDynamic(shape[1]) || shape[1] <= 1 ||
+        dst.getSourceType().getShape() != shape)
+      continue;
+    int64_t width = shape[1];
+    auto isZero = [](OpFoldResult v) { return isConstantIntValue(v, 0); };
+    auto isOne = [](OpFoldResult v) { return isConstantIntValue(v, 1); };
+    auto isRowPrefix = [&](memref::SubViewOp view) {
+      auto [strides, offset] = view.getSourceType().getStridesAndOffset();
+      return strides.back() == 1 &&
+             llvm::all_of(view.getMixedOffsets(), isZero) &&
+             llvm::all_of(view.getMixedStrides(), isOne) &&
+             isOne(view.getMixedSizes()[0]);
+    };
+    if (!isRowPrefix(src) || !isRowPrefix(dst) ||
+        src.getMixedSizes()[1] != dst.getMixedSizes()[1])
+      continue;
+    auto extent = dyn_cast<Value>(src.getMixedSizes()[1]);
+    if (!extent || !loop.isDefinedOutsideOfLoop(extent))
+      continue;
+
+    // Require the existing load buffer and its exact row slice. This excludes
+    // stores and avoids moving/duplicating a per-row allocation into a branch.
+    auto row = dst.getSource().getDefiningOp<memref::SubViewOp>();
+    auto source = src.getSource().getDefiningOp<memref::ReinterpretCastOp>();
+    if (!row || !source || row.getSourceType().getRank() != 2 ||
+        !row.getSource().getDefiningOp<memref::AllocOp>() ||
+        !loop.isDefinedOutsideOfLoop(row.getSource()) ||
+        !loop.isDefinedOutsideOfLoop(source.getSource()) ||
+        row.getMixedOffsets()[0] != OpFoldResult(loop.getInductionVar()) ||
+        !isZero(row.getMixedOffsets()[1]) ||
+        !llvm::all_of(row.getMixedStrides(), isOne) ||
+        !isOne(row.getMixedSizes()[0]) ||
+        !isConstantIntValue(row.getMixedSizes()[1], width))
+      continue;
+
+    rewriter.setInsertionPoint(loop);
+    Location loc = copy.getLoc();
+    Value fullWidth = rewriter.create<arith::ConstantIndexOp>(loc, width);
+    Value full = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                                extent, fullWidth);
+    auto branch =
+        rewriter.create<scf::IfOp>(loc, full, /*withElseRegion=*/true);
+    rewriter.setInsertionPointToStart(branch.thenBlock());
+    IRMapping mapping;
+    auto fastLoop = cast<scf::ForOp>(rewriter.clone(*loop, mapping));
+    auto fastCopy = *fastLoop.getBody()->getOps<memref::CopyOp>().begin();
+    // Under extent == width the two zero-offset subviews are the complete
+    // static rows. Bypass them explicitly; no branch-sensitive folding needed.
+    fastCopy->setOperand(0, mapping.lookupOrDefault(src.getSource()));
+    fastCopy->setOperand(1, mapping.lookupOrDefault(dst.getSource()));
+    loop->moveBefore(branch.elseBlock()->getTerminator());
+    // The A5 backend must be able to specialize the full-width library call
+    // independently of the dynamic tail call that shares its callee.
+    moduleOp->setAttr("tt.full_row_copy", rewriter.getUnitAttr());
+  }
+}
 
 void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
     RewritePatternSet &patterns) {
@@ -1502,12 +1630,13 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect,
-                  LLVM::LLVMDialect, triton::ascend::TritonAscendDialect>();
+  registry
+      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+              tensor::TensorDialect, bufferization::BufferizationDialect,
+              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
+              annotation::AnnotationDialect, LLVM::LLVMDialect,
+              triton::ascend::TritonAscendDialect, scope::ScopeDialect>();
 }
 
 LogicalResult
@@ -1701,6 +1830,22 @@ void TritonToLinalgPass::runOnOperation() {
   // with them it must be tagged mix mode, otherwise the cube tile-and-slice
   // fails (cbuf overflow).
   bool existDot = false;
+  moduleOp.walk([&](hivm::CustomOp customOp) {
+    if (customOp.getCoreType() == hivm::TCoreType::CUBE_AND_VECTOR ||
+        customOp.getCoreType() == hivm::TCoreType::CUBE) {
+      existDot = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  moduleOp.walk([&](hivm::CustomMacroOp customMacroOp) {
+    if (customMacroOp.getCoreType() == hivm::TCoreType::CUBE_AND_VECTOR ||
+        customMacroOp.getCoreType() == hivm::TCoreType::CUBE) {
+      existDot = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
   moduleOp.walk([&](Operation *op) {
     if (isa<triton::DotOp, triton::DotScaledOp, triton::ascend::DotOp,
             hfusion::Conv1DOp, hfusion::Conv2DOp>(op)) {
@@ -1830,12 +1975,6 @@ void TritonToLinalgPass::runOnOperation() {
   auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
     Operation *op = loopOp.getOperation();
     if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr)) {
-      // CFO descriptor loops may still carry a non-descriptor make_range
-      // tensor used by a load/store mask. Route only those loops through the
-      // narrow legacy mask-carrier rewrite; descriptor and opaque slots remain
-      // on the normal pointer-free boundary path.
-      if (!getMarkedMakeRangeCarrierSlots(loopOp).empty())
-        return false;
       return hasPointerFreeControlFlowBoundary(loopOp);
     }
     return !op->hasAttr("UnhandledLoopOp");
@@ -1870,12 +2009,11 @@ void TritonToLinalgPass::runOnOperation() {
     // that its init is produced by reinterpret_cast does not make it BlockData.
     bool hasExpandedPointerDescriptor =
         op->hasAttr(mlir::triton::controlflow::kPointerDescriptorBoundaryAttr);
-    auto markedRangeSlots = getMarkedMakeRangeCarrierSlots(loopOp);
     if (!op->hasAttr("ExtractedLoadOrStore") &&
-        (needsLegacyBlockDataLoopRewrite(loopOp) || !markedRangeSlots.empty()))
+        needsLegacyBlockDataLoopRewrite(loopOp))
       op->setAttr("UnhandledLoopOp", UnitAttr::get(op->getContext()));
 
-    if (hasExpandedPointerDescriptor && markedRangeSlots.empty())
+    if (hasExpandedPointerDescriptor)
       return;
 
     for (auto res : loopOp->getResults()) {
@@ -1957,6 +2095,8 @@ void TritonToLinalgPass::runOnOperation() {
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
   }
+
+  specializeFullRowCopies(moduleOp);
 
   // 10. Collapses call-site locations whose callee is an inlined Triton stdlib
   // helper (under site-packages) down to their caller (user-file) frame
@@ -2186,8 +2326,20 @@ void TritonToLinalgPass::runOnOperation() {
 
   // ScalarPointerCarrier is a pass-local provenance marker. Keep it through
   // PointerCast post-processing so only known scalar-address carriers use the
-  // new layout path, then remove it before downstream dialects observe the IR.
+  // new layout path. A carrier that is consumed directly (without an
+  // intermediate reinterpret_cast) is not rebuilt by the loop above, so give
+  // that remaining GM pointer the same address-space annotation before the
+  // provenance marker is removed.
   moduleOp.walk([](hivm::PointerCastOp pointerCast) {
+    if (!pointerCast->hasAttr(kScalarPointerCarrierAttr))
+      return;
+    OpBuilder builder(pointerCast);
+    builder.setInsertionPointAfter(pointerCast);
+    auto mark = builder.create<annotation::MarkOp>(pointerCast.getLoc(),
+                                                   pointerCast.getResult());
+    mark->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
+                  {hivm::AddressSpaceAttr::get(pointerCast.getContext(),
+                                               hivm::AddressSpace::GM)});
     pointerCast->removeAttr(kScalarPointerCarrierAttr);
   });
 

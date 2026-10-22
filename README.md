@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+=======
+<!-- markdownlint-disable-file MD041 -->
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 | **`Documentation`** | **`Nightly Wheels`** |
 |-------------------- | -------------------- |
@@ -7,14 +11,27 @@
 
 ![Triton Banner](https://github.com/user-attachments/assets/b4b6972a-857c-417f-bf2c-f16f38a358c0)
 
+<<<<<<< HEAD
 The 3rd Triton Developer Conference took place on October 21, 2025 at the Microsoft Silicon Valley Campus in Mountain View, California.
+=======
+<p align="center">
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+</p>
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 ### Conference Materials
 
 Conference recordings and materials are now available online:
 
+<<<<<<< HEAD
 - **Conference Videos:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLc_vA1r0qoiQqCdWFDUDqI90oY5EjfGuO)
 - **Conference Slides:** [Google Drive Folder](https://drive.google.com/drive/folders/1KB6tD3UM1J0_eUp-F-JSlGrargLBawIr)
+=======
+- [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
+- [2026.07.31] Triton-Ascend 3.2.2 official release is now available
+- [2026.04.30] Triton-Ascend 3.2.1 official release is now available
+- [2026.01.20] Triton-Ascend 3.2.0 official release is now available
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 For previous conference materials, see:
 - [2024 Conference Materials](docs/meetups/dev_conference_2024.md)
@@ -32,8 +49,36 @@ The [official documentation](https://triton-lang.org) contains installation inst
 
 You can install the latest stable release of Triton from pip:
 
+<<<<<<< HEAD
 ```shell
 pip install triton
+=======
+Supported operating systems: linux (aarch64/x86_64)
+
+Supported Ascend products: Atlas A2 products\Atlas A3 products\Ascend 950PR&950DT products
+
+Minimum hardware configuration: single card with 32GB memory (recommended)
+
+#### Software Dependencies
+
+Determine and install the Python, CANN, and TorchNPU software versions. This step must be completed before both package installation and source code compilation installation.
+
+- Python version selection: py3.10-py3.13 are all supported.
+
+- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
+
+- TorchNPU version selection: The currently bundled TorchNPU version is 2.10.0.post7.
+
+### Accessing Ascend NPU
+
+If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
+
+### Quick Installation
+
+```bash
+# Taking the installation of triton-ascend 3.6.0 as an example
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
+>>>>>>> upstream/dev/main-upgrade-3.7
 ```
 
 Binary wheels are available for CPython 3.10-3.14.
@@ -44,21 +89,80 @@ Binary wheels are available for CPython 3.10-3.14.
 git clone https://github.com/triton-lang/triton.git
 cd triton
 
+<<<<<<< HEAD
 pip install -r python/requirements.txt # build-time dependencies
+=======
+```bash
+apt update
+# Supported clang versions: clang-15, clang-17, clang-20.1.8
+apt install zlib1g-dev clang-15 lld-15
+apt install ccache # optional
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
+update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
+pip install ninja cmake wheel pybind11 # build-time dependencies
+```
+
+#### Build Triton-Ascend
+
+```bash
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+git checkout main
+>>>>>>> upstream/dev/main-upgrade-3.7
 pip install -e .
 ```
 
 Or with a virtualenv:
 
+<<<<<<< HEAD
 ```shell
 git clone https://github.com/triton-lang/triton.git
 cd triton
+=======
+```bash
+# If you need to customize the LLVM build process, you can execute this step first before compiling Triton-Ascend
+# Check out the specified version of LLVM source code and apply patches
+git clone --no-checkout https://github.com/llvm/llvm-project.git
+cd llvm-project
+git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+git apply llvm_patch_f6ded0b.patch
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 python -m venv .venv --prompt triton
 source .venv/bin/activate
 
+<<<<<<< HEAD
 pip install -r python/requirements.txt # build-time dependencies
 pip install -e .
+=======
+# Build a custom LLVM version
+cd {PATH_TO}/llvm_project
+mkdir build
+cd build
+cmake ../llvm \
+    -G Ninja \
+    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+    -DCMAKE_LINKER=/usr/bin/lld-15 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+    -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+    -DLLVM_ENABLE_LLD=ON \
+    -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
+ninja install
+
+# Compile Triton-Ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+
+LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
+TRITON_BUILD_WITH_CCACHE=true \
+TRITON_BUILD_WITH_CLANG_LLD=true \
+TRITON_BUILD_PROTON=OFF \
+TRITON_WHEEL_NAME="triton-ascend" \
+TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+python3 setup.py install
+>>>>>>> upstream/dev/main-upgrade-3.7
 ```
 
 # Building with a custom LLVM
@@ -116,6 +220,7 @@ says:
 
 # Tips for building
 
+<<<<<<< HEAD
 - Set `TRITON_BUILD_WITH_CLANG_LLD=true` as an environment variable to use clang
   and lld.  lld in particular results in faster builds.
 
@@ -156,6 +261,27 @@ says:
 
 There currently isn't a turnkey way to run all the Triton tests, but you can
 follow the following recipe:
+=======
+- [Quick Start](./docs/en/quick_start.md)
+
+- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/en/latest/index.html)
+
+- [Installation Guide](./docs/en/installation_guide.md)
+
+- [Architecture Design and Core Features](./docs/en/architecture_design_and_core_features.md)
+
+- [Operator Development Guide](./docs/en/programming_guide/index.md)
+
+- [Operator Migration Guide](./docs/en/migration_guide/migrate_from_gpu.md)
+
+- [Operator Debugging Guide](./docs/en/debug_guide/debugging.md#)
+
+- [Performance Tuning Guide](./docs/en/debug_guide/profiling.md#)
+
+- [Environment Variables Reference](./docs/en/environment_variable_and_compiler_options_reference.md)
+
+- [FAQ](./docs/en/FAQ.md)
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 ```shell
 # One-time setup.  Note this will reinstall local Triton because torch
@@ -169,7 +295,11 @@ $ make test
 $ make test-nogpu
 ```
 
+<<<<<<< HEAD
 # Tips for hacking
+=======
+- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/en/community/CONTRIBUTING.md)
+>>>>>>> upstream/dev/main-upgrade-3.7
 
 For detailed instructions on how to debug Triton's frontend, please refer to this [tutorial](https://triton-lang.org/main/programming-guide/chapter-3/debugging.html). The following includes additional tips for hacking on Triton's backend.
 

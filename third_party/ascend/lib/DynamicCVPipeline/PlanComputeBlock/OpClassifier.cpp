@@ -28,18 +28,23 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
@@ -1073,6 +1078,26 @@ int OpClassifierPass::propagateVectorUpstream() {
 
 namespace {
 
+Value getAliasSource(Value val) {
+  auto *op = val.getDefiningOp();
+  if (!op) {
+    return nullptr;
+  }
+  return llvm::TypeSwitch<Operation *, Value>(op)
+      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+      .Case([](bufferization::ToTensorOp totensorOp) {
+        return totensorOp.getBuffer();
+      })
+      .Default([](auto) { return nullptr; });
+}
+
+Value getViewSource(Value val) {
+  while (auto source = getAliasSource(val)) {
+    val = source;
+  }
+  return val;
+}
+
 // A loader loop may only contain data-movement and (scalar) index computation.
 // Any tensor-producing compute op means the loop does real vector work and must
 // not be swallowed into the cube pipe.
@@ -1092,13 +1117,36 @@ bool isDisqualifyingLoaderOp(Operation *op) {
       }
     }
   }
+  if (auto memInt = llvm::dyn_cast<MemoryEffectOpInterface>(op)) {
+    // No matmul - must not be store to gm
+    llvm::SmallVector<MemoryEffects::EffectInstance> effects;
+    memInt.getEffects(effects);
+    for (auto effect : effects) {
+      Value val = effect.getValue();
+      if (!val || !isa<MemoryEffects::Write>(effect.getEffect())) {
+        continue;
+      }
+      val = getViewSource(val);
+      if (auto barg = llvm::dyn_cast<BlockArgument>(val)) {
+        if (llvm::isa<func::FuncOp>(barg.getOwner()->getParentOp())) {
+          return true;
+        }
+      }
+    }
+  }
   return false;
 }
 
 } // namespace
 
 bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
+  if (forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+    return false;
+
   // Every result must be live and used only by CUBE consumers
+  if (forOp.getNumResults() == 0) {
+    return false;
+  }
   for (Value result : forOp.getResults()) {
     for (Operation *user : result.getUsers()) {
       if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
@@ -1157,7 +1205,7 @@ markLoopBodyAsCube(Operation *loop, Block *body,
   opCoreTypes[loop] = OP_CUBE_ONLY;
 }
 
-int OpClassifierPass::penetrateCubeIntoForLoops() {
+llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
   // Collect first so recoloring earlier loops cannot perturb the scan.
   // Use a combined walk to collect both ForOps and WhileOps
   llvm::SmallVector<Operation *> loaderLoops;
@@ -1176,7 +1224,7 @@ int OpClassifierPass::penetrateCubeIntoForLoops() {
       markLoopBodyAsCube(loop, body, opCoreTypes);
   }
 
-  return 0;
+  return llvm::success();
 }
 
 // ============================================================================
@@ -1867,8 +1915,7 @@ void OpClassifierPass::runOnOperation() {
   }
 
   // Step 4: Penetrate CUBE coloring into pure loader for-loops.
-  if (CVPipeline::isCubeBlockMergeEnabled() &&
-      penetrateCubeIntoForLoops() != 0) {
+  if (penetrateCubeIntoForLoops().failed()) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
