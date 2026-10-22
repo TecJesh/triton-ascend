@@ -50,10 +50,10 @@ index 8a5188721..3af6c42b1 100644
  mlir_tablegen(HFusionOpsTypes.cpp.inc -gen-typedef-defs -typedefs-dialect=hfusion)
  mlir_tablegen(HFusionOpsDialect.h.inc -gen-dialect-decls -dialect=hfusion ${tblgen_feat_list})
 diff --git a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
-index c27ce733c..ed303b7e8 100644
+index c27ce733c..9afad8ce4 100644
 --- a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
 +++ b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
-@@ -153,13 +153,21 @@ def MulExtUiOp : HFusion_Op<"mulextui", [Pure, Commutative,
+@@ -153,13 +153,24 @@ def MulExtUiOp : HFusion_Op<"mulextui", [Pure, Commutative,
  
  }
  
@@ -61,8 +61,11 @@ index c27ce733c..ed303b7e8 100644
 +// declaration, so out-of-line definitions need an explicit extraClassDeclaration.
 +#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
 +defvar ReifyShapesTrait = ReifyRankedShapedTypeOpInterface;
++// LLVM 23+: keep defaulted bool attrs non-optional for property codegen.
++defvar BoolDefaultFalse = DefaultValuedAttr<BoolAttr, "false">;
 +#else
 +defvar ReifyShapesTrait = DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>;
++defvar BoolDefaultFalse = DefaultValuedOptionalAttr<BoolAttr, "false">;
 +#endif
 +
  //===----------------------------------------------------------------------===//
@@ -76,7 +79,7 @@ index c27ce733c..ed303b7e8 100644
                                               AllTypesMatch<["input"]>]> {
    let summary = [{
        Constructs one tensor by interleaving n input tensors.
-@@ -174,9 +182,16 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
+@@ -174,9 +185,16 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
  
    let arguments = (ins Variadic<AnyTypeOf<[AnyRankedTensor]>>:$input);
    let results = (outs AnyTypeOf<[AnyRankedTensor]>:$output);
@@ -93,7 +96,7 @@ index c27ce733c..ed303b7e8 100644
    let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
    let hasVerifier = 1;
  }
-@@ -187,7 +202,7 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
+@@ -187,7 +205,7 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
  
  def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
                                                   SameOperandsAndResultRank,
@@ -102,7 +105,7 @@ index c27ce733c..ed303b7e8 100644
                                                   AllTypesMatch<["output"]>]> {
    let summary = [{
      Constructs two tensors by deinterleaving an input tensor
-@@ -206,10 +221,18 @@ def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
+@@ -206,10 +224,18 @@ def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
      * 1: Output only channel 1 (odd indexes)
    }];
  
@@ -121,30 +124,30 @@ index c27ce733c..ed303b7e8 100644
  
    let arguments = (ins AnyTypeOf<[AnyRankedTensor]>:$input,
                         I64Attr:$channelIndex);
-@@ -320,7 +343,7 @@ def CumsumOp : HFusion_Op<"cumsum",
+@@ -320,7 +346,7 @@ def CumsumOp : HFusion_Op<"cumsum",
    let arguments = (ins RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64, F8E4M3FN, F8E5M2]>:$input,
                         ConfinedAttr<DenseI64ArrayAttr,
                        [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
-+                       DefaultValuedAttr<BoolAttr, "false">:$reverse);
++                       BoolDefaultFalse:$reverse);
    let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64, F8E4M3FN, F8E5M2]>:$output);
    let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
    let hasVerifier = 1;
-@@ -344,7 +367,7 @@ def CumprodOp : HFusion_Op<"cumprod",
+@@ -344,7 +370,7 @@ def CumprodOp : HFusion_Op<"cumprod",
    let arguments = (ins RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64]>:$input,
                         ConfinedAttr<DenseI64ArrayAttr,
                        [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
-+                       DefaultValuedAttr<BoolAttr, "false">:$reverse);
++                       BoolDefaultFalse:$reverse);
    let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64]>:$output);
    let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
    let hasVerifier = 1;
-@@ -615,7 +638,7 @@ def SortOp : HFusion_Op<"sort",
+@@ -615,7 +641,7 @@ def SortOp : HFusion_Op<"sort",
        ```
    }];
    let arguments = (ins TensorOrMemref:$src,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
-+                       DefaultValuedAttr<BoolAttr, "false">:$descending,
++                       BoolDefaultFalse:$descending,
                         I64Attr:$sort_axis);
    let results = (outs Variadic<AnyRankedTensor>:$result);
    let assemblyFormat = [{
@@ -179,11 +182,38 @@ index fd663b8b0..928721531 100644
  add_public_tablegen_target(BiShengIRHIVMVectorOpsIncGen)
  add_dependencies(mlir-headers BiShengIRHIVMVectorOpsIncGen)
  
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+index 10bf42dd9..b3f110365 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+@@ -130,7 +130,7 @@ def SetAtomicOp : HIVM_Op<"set_atomic"> {
+   }];
+   let arguments = (ins HIVM_AtomicKindAttr:$kind,
+                        OptionalAttr<TypeAttr>:$type);
+-  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` $type `]` attr-dict";
++  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` ($type^)? `]` attr-dict";
+ }
+ 
+ def SetCtrlOp : HIVM_Op<"set_ctrl"> {
 diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
-index ffb66a4fa..60b2ae256 100644
+index ffb66a4fa..00c939318 100644
 --- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
 +++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
-@@ -86,9 +86,19 @@ class HIVM_ElementwiseNaryOp<string mnemonic, list<Trait> traits = [], Type srcT
+@@ -26,6 +26,13 @@ include "bishengir/Dialect/HIVM/IR/HIVMBase.td"
+ include "bishengir/Dialect/HIVM/IR/HIVMAttrs.td"
+ include "bishengir/Dialect/HIVM/IR/HIVMTraits.td"
+ 
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++// LLVM 23+: keep defaulted bool attrs non-optional for property codegen.
++defvar BoolDefaultFalse = DefaultValuedAttr<BoolAttr, "false">;
++#else
++defvar BoolDefaultFalse = DefaultValuedOptionalAttr<BoolAttr, "false">;
++#endif
++
+ //===----------------------------------------------------------------------===//
+ // HIVM Vector Operations.
+ //===----------------------------------------------------------------------===//
+@@ -86,9 +93,19 @@ class HIVM_ElementwiseNaryOp<string mnemonic, list<Trait> traits = [], Type srcT
        (`transpose` `=` $transpose^)?
        (`->` type($result)^)?
    }];
@@ -204,30 +234,30 @@ index ffb66a4fa..60b2ae256 100644
        return mlir::hivm::detail::getFlattenedElementwise(*this, options);
      }
      SmallVector<int64_t> getLimitedAxes() {
-@@ -1975,7 +1985,7 @@ def VCumprodOp : HIVM_VectorOp<"vcumprod",
+@@ -1975,7 +1992,7 @@ def VCumprodOp : HIVM_VectorOp<"vcumprod",
                         Optional<AnyMemRef>:$temp_buffer,
                         ConfinedAttr<DenseI64ArrayAttr,
                         [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
-+                       DefaultValuedAttr<BoolAttr, "false">:$reverse
++                       BoolDefaultFalse:$reverse
    );
    let builders = [
      OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
-@@ -2045,7 +2055,7 @@ def VCumsumOp : HIVM_VectorOp<"vcumsum",
+@@ -2045,7 +2062,7 @@ def VCumsumOp : HIVM_VectorOp<"vcumsum",
                         Optional<AnyMemRef>:$temp_buffer,
                         ConfinedAttr<DenseI64ArrayAttr,
                         [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
-+                       DefaultValuedAttr<BoolAttr, "false">:$reverse
++                       BoolDefaultFalse:$reverse
    );
    let builders = [
      OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
-@@ -2256,7 +2266,7 @@ def VSortOp : HIVM_VectorOp<"vsort",
+@@ -2256,7 +2273,7 @@ def VSortOp : HIVM_VectorOp<"vsort",
    let arguments = (ins TensorOrMemref:$src,
                         Variadic<TensorOrMemref>:$dst,
                         Optional<AnyMemRef>:$temp_buffer,
 -                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
-+                       DefaultValuedAttr<BoolAttr, "false">:$descending,
++                       BoolDefaultFalse:$descending,
                         DefaultValuedAttr<I64Attr, "-1">:$sort_axis
    );
    let results = (outs Variadic<AnyRankedTensor>:$result);
@@ -315,6 +345,23 @@ index f96bfdb8f..b4e19e8c0 100644
          if (idx.value() >= inputs.size())
            continue;
          if (userCanReachMatmulOuts(inputs[idx.value()], visited))
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+index f71750119..1722ef8e5 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+@@ -837,7 +837,12 @@ void ScatterTOp::getEffects(
+ 
+ struct AnchorResource
+     : public mlir::SideEffects::Resource::Base<AnchorResource> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 23+: SideEffects::Resource::getName() is const-qualified.
++  mlir::StringRef getName() const final { return "<Anchor>"; }
++#else
+   mlir::StringRef getName() final { return "<Anchor>"; }
++#endif
+ };
+ 
+ void mlir::hivm::AnchorOp::getEffects(
 diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
 index 3d733988a..a76aeed4b 100644
 --- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
@@ -379,65 +426,38 @@ index da5a9b5d3..f6d774eec 100644
  void ScopeOp::getEntrySuccessorRegions(
      ArrayRef<Attribute> operands, SmallVectorImpl<RegionSuccessor> &regions) {
    // Scope always enters its region (no operands flow in due to NoRegionArguments trait)
-diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
-index b3f5cf9a2..5afeb482c 100644
---- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
-+++ b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
-@@ -876,7 +876,11 @@ void WarpSpecializeOp::getSuccessorRegions(
-   }
-   // And the default region branches transparently back to the parent.
-   assert(src.getRegionOrNull() == &getDefaultRegion());
-+#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
-+  successors.push_back(RegionSuccessor::parent());
-+#else
-   successors.push_back(RegionSuccessor(getResults()));
-+#endif
- }
- 
- LogicalResult WarpSpecializeOp::verify() {
-
-diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
-index 10bf42dd9..b3f110365 100644
---- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
-+++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
-@@ -130,7 +130,7 @@ def SetAtomicOp : HIVM_Op<"set_atomic"> {
-   }];
-   let arguments = (ins HIVM_AtomicKindAttr:$kind,
-                        OptionalAttr<TypeAttr>:$type);
--  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` $type `]` attr-dict";
-+  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` ($type^)? `]` attr-dict";
- }
- 
- def SetCtrlOp : HIVM_Op<"set_ctrl"> {
-
 diff --git a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
-index dcb47d297..c4b34690c 100644
+index dcb47d297..5ef249224 100644
 --- a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
 +++ b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
-@@ -32,7 +32,7 @@ static std::optional<int64_t> computeConstantBound(OpFoldResult value,
+@@ -32,7 +32,13 @@ static std::optional<int64_t> computeConstantBound(OpFoldResult value,
    auto bound = ValueBoundsConstraintSet::computeConstantBound(
        type, ValueBoundsConstraintSet::Variable(value),
        /*stopCondition=*/nullptr,
 -      /*closedUB=*/type == presburger::BoundType::UB);
-+      ValueBoundsOptions{/*closedUB=*/type == presburger::BoundType::UB});
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      // LLVM 23+: closedUB moved into ValueBoundsOptions.
++      ValueBoundsOptions{/*closedUB=*/type == presburger::BoundType::UB}
++#else
++      /*closedUB=*/type == presburger::BoundType::UB
++#endif
++  );
    if (succeeded(bound)) {
      return *bound;
    }
-
-diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
-index f71750119..6c7c0f815 100644
---- a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
-+++ b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
-@@ -837,7 +837,7 @@ void ScatterTOp::getEffects(
+diff --git a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
+index 0da48dffb..cdab217b8 100644
+--- a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
+@@ -50,7 +50,7 @@ public:
  
- struct AnchorResource
-     : public mlir::SideEffects::Resource::Base<AnchorResource> {
--  mlir::StringRef getName() final { return "<Anchor>"; }
-+  mlir::StringRef getName() const final { return "<Anchor>"; }
- };
- 
- void mlir::hivm::AnchorOp::getEffects(
-
+ /// Main entry to emit compile configs.
+ bool emitCompileConfigs(const RecordKeeper &records, raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   for (const Record *R : specs) {
+     ConfigOption cfgOpt(R);
 diff --git a/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp
 index 91ab82ab3..44f9c1974 100644
 --- a/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp
@@ -460,7 +480,32 @@ index 91ab82ab3..44f9c1974 100644
        records.getAllDerivedDefinitions(kOptionClassName);
    OS << "#ifdef GEN_OPTION_REGISTRATIONS\n";
  
-
+diff --git a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
+index 61ad98ce9..467d310d5 100644
+--- a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
+@@ -72,7 +72,7 @@ void genConfigsAndOptionsConversionForGroups(
+ /// options.
+ bool emitConfigsAndOptionsConversion(const RecordKeeper &records,
+                                      raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   StringMap<SmallVector<ConfigOption>> passGroup2Options;
+   for (const Record *R : specs) {
+diff --git a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
+index 93f7db9d9..4a01a1e05 100644
+--- a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
+@@ -92,7 +92,7 @@ static void genPassOptionsForGroups(
+ /// Main entry to emit target spec decls.
+ static bool emitPassOptions(const RecordKeeper &records, raw_ostream &OS,
+                             bool isPipeline = false) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   StringMap<SmallVector<ConfigOption>> passGroup2Options;
+   for (const Record *R : specs) {
 diff --git a/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp b/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp
 index b916fc5a5..576f90a6d 100644
 --- a/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp
@@ -475,45 +520,19 @@ index b916fc5a5..576f90a6d 100644
    if (!generator) {
      os << records;
      return false;
-
-diff --git a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
-index 0da48dffb..cdab217b8 100644
---- a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
-+++ b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
-@@ -50,7 +50,7 @@ public:
+diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
+index b3f5cf9a2..5afeb482c 100644
+--- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
++++ b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
+@@ -876,7 +876,11 @@ void WarpSpecializeOp::getSuccessorRegions(
+   }
+   // And the default region branches transparently back to the parent.
+   assert(src.getRegionOrNull() == &getDefaultRegion());
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  successors.push_back(RegionSuccessor::parent());
++#else
+   successors.push_back(RegionSuccessor(getResults()));
++#endif
+ }
  
- /// Main entry to emit compile configs.
- bool emitCompileConfigs(const RecordKeeper &records, raw_ostream &OS) {
--  std::vector<Record *> specs =
-+  ArrayRef<const Record *> specs =
-       records.getAllDerivedDefinitions(kOptionClassName);
-   for (const Record *R : specs) {
-     ConfigOption cfgOpt(R);
-
-diff --git a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
-index 61ad98ce9..467d310d5 100644
---- a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
-+++ b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
-@@ -72,7 +72,7 @@ void genConfigsAndOptionsConversionForGroups(
- /// options.
- bool emitConfigsAndOptionsConversion(const RecordKeeper &records,
-                                      raw_ostream &OS) {
--  std::vector<Record *> specs =
-+  ArrayRef<const Record *> specs =
-       records.getAllDerivedDefinitions(kOptionClassName);
-   StringMap<SmallVector<ConfigOption>> passGroup2Options;
-   for (const Record *R : specs) {
-
-diff --git a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
-index 93f7db9d9..4a01a1e05 100644
---- a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
-+++ b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
-@@ -92,7 +92,7 @@ static void genPassOptionsForGroups(
- /// Main entry to emit target spec decls.
- static bool emitPassOptions(const RecordKeeper &records, raw_ostream &OS,
-                             bool isPipeline = false) {
--  std::vector<Record *> specs =
-+  ArrayRef<const Record *> specs =
-       records.getAllDerivedDefinitions(kOptionClassName);
-   StringMap<SmallVector<ConfigOption>> passGroup2Options;
-   for (const Record *R : specs) {
+ LogicalResult WarpSpecializeOp::verify() {
