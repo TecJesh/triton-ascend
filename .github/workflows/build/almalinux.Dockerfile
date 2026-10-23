@@ -15,8 +15,9 @@ RUN alternatives --set python3 /usr/bin/python3.9
 RUN python3 -m pip install --upgrade pip
 RUN python3 -m pip install --upgrade cmake ninja sccache lit nanobind
 
-# Install MLIR's Python Dependencies
-RUN python3 -m pip install -r /source/llvm-project/mlir/python/requirements.txt
+# NOTE: MLIR Python bindings are disabled (-DMLIR_ENABLE_BINDINGS_PYTHON=OFF),
+# so mlir/python/requirements.txt (numpy>=2.1, needs Python>=3.10) is neither
+# needed nor installable on this image's Python 3.9.
 
 # Configure, Build, Test, and Install LLVM
 RUN cmake -GNinja -Bbuild \
