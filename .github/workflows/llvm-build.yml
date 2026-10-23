@@ -31,29 +31,32 @@ jobs:
   build:
     name: Build on ${{ matrix.config.runner }}
     runs-on: ${{ matrix.config.runs_on }}
-    # Cann container provides buildx remote builder config for AlmaLinux.
-    # Ubuntu native builds also work inside this container.
-    container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 240
-    env:
-      PIP_INDEX_URL: http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
-      PIP_TRUSTED_HOST: cache-service.nginx-pypi-cache.svc.cluster.local
 
     strategy:
       fail-fast: false
       matrix:
         config:
-        - {runner: 'Ubuntu 22.04', runs_on: 'linux-amd64-cpu-4', target-os: 'ubuntu', arch: 'x64'}
-        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'ubuntu', arch: 'arm64'}
-        - {runner: 'AlmaLinux 8', runs_on: 'linux-amd64-cpu-4', target-os: 'almalinux', arch: 'x64'}
-        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'almalinux', arch: 'arm64'}
+        - {runner: 'Ubuntu 22.04', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'x64'}
+        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'ubuntu', arch: 'arm64'}
+        - {runner: 'AlmaLinux 8', runs_on: 'ubuntu-22.04', target-os: 'almalinux', arch: 'x64'}
+        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'almalinux', arch: 'arm64'}
 
     steps:
     - name: Checkout Repo
       uses: actions/checkout@v5
 
-    - name: Config mirrors & install build tools
+    - name: Free disk space
+      shell: bash
+      run: |
+        df -h
+        sudo apt-get remove -y 'php.*' google-chrome-stable firefox powershell mono-devel || true
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+        df -h
+
+    - name: Install build tools (Ubuntu)
       if: matrix.config.target-os == 'ubuntu'
       shell: bash
       run: |
@@ -129,17 +132,9 @@ jobs:
         fi
 
     - name: Set up Python
-      shell: bash
-      run: |
-        if command -v python3 2>/dev/null; then
-          python3 --version
-        elif command -v apt-get 2>/dev/null; then
-          apt-get update && apt-get install -y python3 python3-pip
-          python3 --version
-        else
-          echo "ERROR: cannot find or install python3"
-          exit 1
-        fi
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
 
     - name: Install Prerequisites
       shell: bash
@@ -175,10 +170,10 @@ jobs:
 
         cmake -GNinja -Bllvm-project/build
         -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang-15 -DCMAKE_CXX_COMPILER=clang++-15
         -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
         -DCMAKE_INSTALL_PREFIX="${LLVM_INSTALL_DIR}"
-        -DCMAKE_LINKER=lld
+        -DCMAKE_LINKER=lld-15
         -DLLVM_BUILD_UTILS=ON
         -DLLVM_BUILD_TOOLS=ON
         -DLLVM_ENABLE_ASSERTIONS=ON
@@ -203,6 +198,10 @@ jobs:
         mkdir -p "${SCCACHE_DIR_PATH}"
         touch "${SCCACHE_DIR_PATH}/.gitkeep"
 
+    - name: Set up Docker Buildx
+      if: matrix.config.target-os == 'almalinux'
+      uses: docker/setup-buildx-action@v3
+
     - name: Build LLVM Image (AlmaLinux)
       if: matrix.config.target-os == 'almalinux'
       uses: docker/build-push-action@v7
@@ -210,7 +209,7 @@ jobs:
         context: .
         file: .github/workflows/build/almalinux.Dockerfile
         build-args: |
-          BASE_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/almalinux:8.10-20250411
+          BASE_IMAGE=almalinux:8.10-20250411
           llvm_dir=llvm-project
         target: output
         outputs: type=local,dest=.
