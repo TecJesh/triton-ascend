@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 03a51acaa..98a95f3f4 100644
+index 03a51acaa..cf3d8c23f 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -34,6 +34,21 @@ if(LLVM_MAJOR_VERSION_20_COMPATIBLE)
@@ -183,7 +183,7 @@ index fd663b8b0..928721531 100644
  add_dependencies(mlir-headers BiShengIRHIVMVectorOpsIncGen)
  
 diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
-index 10bf42dd9..b3f110365 100644
+index 755b371f6..ad4e9457b 100644
 --- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
 +++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
 @@ -130,7 +130,7 @@ def SetAtomicOp : HIVM_Op<"set_atomic"> {
@@ -196,7 +196,7 @@ index 10bf42dd9..b3f110365 100644
  
  def SetCtrlOp : HIVM_Op<"set_ctrl"> {
 diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
-index ffb66a4fa..00c939318 100644
+index aae958960..a4af57c2d 100644
 --- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
 +++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
 @@ -26,6 +26,13 @@ include "bishengir/Dialect/HIVM/IR/HIVMBase.td"
@@ -316,10 +316,10 @@ index 14063506d..f83416d88 100644
      SingleBlockImplicitTerminator<"scope::ReturnOp">,
      SingleBlock,
 diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
-index f96bfdb8f..b4e19e8c0 100644
+index c2dde7710..1c3244056 100644
 --- a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
 +++ b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
-@@ -99,7 +99,12 @@ getTerminatorSuccessorRegions(Operation *terminator,
+@@ -106,7 +106,12 @@ getTerminatorSuccessorRegions(Operation *terminator,
      termIface.getSuccessorRegions(operandAttrs, successors);
      return;
    }
@@ -332,7 +332,7 @@ index f96bfdb8f..b4e19e8c0 100644
  }
  
  static bool userCanReachMatmulOuts(Value current,
-@@ -131,7 +136,12 @@ static bool userCanReachMatmulOuts(Value current,
+@@ -146,7 +151,12 @@ static bool userCanReachMatmulOuts(Value current,
        SmallVector<RegionSuccessor> successors;
        getTerminatorSuccessorRegions(user, branchOp, successors);
        for (const RegionSuccessor &successor : successors) {
@@ -346,10 +346,10 @@ index f96bfdb8f..b4e19e8c0 100644
            continue;
          if (userCanReachMatmulOuts(inputs[idx.value()], visited))
 diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
-index f71750119..1722ef8e5 100644
+index 2003df659..25d1b585f 100644
 --- a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
 +++ b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
-@@ -837,7 +837,12 @@ void ScatterTOp::getEffects(
+@@ -853,7 +853,12 @@ void ScatterTOp::getEffects(
  
  struct AnchorResource
      : public mlir::SideEffects::Resource::Base<AnchorResource> {
@@ -362,11 +362,31 @@ index f71750119..1722ef8e5 100644
  };
  
  void mlir::hivm::AnchorOp::getEffects(
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+index a8766aaa4..dcf6af084 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+@@ -397,7 +397,14 @@ public:
+       FailureOr<int64_t> upperBound =
+           ValueBoundsConstraintSet::computeConstantBound(
+               presburger::BoundType::UB, dynSize,
+-              /*stopCondition=*/nullptr, /*closedUB=*/true);
++              /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++              // LLVM 62b7cf9: closedUB moved into ValueBoundsOptions.
++              ValueBoundsOptions{/*closedUB=*/true}
++#else
++              /*closedUB=*/true
++#endif
++          );
+       if (failed(upperBound)) {
+         upperBound = resolveDynamicDimToBound(dynSize);
+       }
 diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
-index 3d733988a..a76aeed4b 100644
+index eb833a261..1005b5295 100644
 --- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
 +++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
-@@ -423,8 +423,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+@@ -402,8 +402,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
    SmallVector<RegionSuccessor, 2> entrySuccessors;
    branch.getSuccessorRegions(RegionBranchPoint::parent(), entrySuccessors);
    for (RegionSuccessor &entrySuccessor : entrySuccessors) {
@@ -381,7 +401,7 @@ index 3d733988a..a76aeed4b 100644
    }
  
    for (Region &region : branch->getRegions()) {
-@@ -436,8 +441,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+@@ -415,8 +420,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
              block.getTerminator());
          if (!terminator)
            continue;
@@ -397,7 +417,7 @@ index 3d733988a..a76aeed4b 100644
      }
    }
 diff --git a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
-index da5a9b5d3..f6d774eec 100644
+index 129de3b46..1b87f5556 100644
 --- a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 +++ b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 @@ -68,13 +68,25 @@ void ScopeOp::print(OpAsmPrinter &p) {
@@ -445,6 +465,62 @@ index dcb47d297..5ef249224 100644
    if (succeeded(bound)) {
      return *bound;
    }
+diff --git a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+index 71ddcbdcf..b793fb4a9 100644
+--- a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
++++ b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+@@ -42,7 +42,12 @@ static std::optional<int64_t> getCollapsedConstantIndexValue(Value v) {
+   auto ub = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, v,
+       /*stopCondition=*/nullptr,
+-      /*closedUB=*/true);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      ValueBoundsOptions{/*closedUB=*/true}
++#else
++      /*closedUB=*/true
++#endif
++  );
+   if (failed(ub) || *lb != *ub)
+     return std::nullopt;
+   return *lb;
+@@ -109,7 +114,12 @@ static FailureOr<bool> getSingleIterationTripCount(scf::ForOp forOp,
+   auto ivUB = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, iv,
+       /*stopCondition=*/nullptr,
+-      /*closedUB=*/true);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      ValueBoundsOptions{/*closedUB=*/true}
++#else
++      /*closedUB=*/true
++#endif
++  );
+   if (failed(ivLB) || failed(ivUB))
+     return false;
+   if (*ivLB != *ivUB)
+@@ -263,11 +273,21 @@ static IndexValueConstantBounds computeIndexValueConstantBounds(Value value) {
+       ValueBoundsConstraintSet::computeConstantBound(
+           presburger::BoundType::LB, value,
+           /*stopCondition=*/nullptr,
+-          /*closedUB=*/true),
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++          ValueBoundsOptions{/*closedUB=*/true}
++#else
++          /*closedUB=*/true
++#endif
++          ),
+       ValueBoundsConstraintSet::computeConstantBound(
+           presburger::BoundType::UB, value,
+           /*stopCondition=*/nullptr,
+-          /*closedUB=*/true),
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++          ValueBoundsOptions{/*closedUB=*/true}
++#else
++          /*closedUB=*/true
++#endif
++          ),
+   };
+ }
+ 
 diff --git a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
 index 0da48dffb..cdab217b8 100644
 --- a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
@@ -494,7 +570,7 @@ index 61ad98ce9..467d310d5 100644
    StringMap<SmallVector<ConfigOption>> passGroup2Options;
    for (const Record *R : specs) {
 diff --git a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
-index 93f7db9d9..4a01a1e05 100644
+index 2777735c1..3c7adcf97 100644
 --- a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
 +++ b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
 @@ -92,7 +92,7 @@ static void genPassOptionsForGroups(
@@ -520,6 +596,55 @@ index b916fc5a5..576f90a6d 100644
    if (!generator) {
      os << records;
      return false;
+diff --git a/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
+index 59a8d020d..d617f95e3 100644
+--- a/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
+@@ -25,7 +25,12 @@ namespace mlir {
+ namespace triton {
+ 
+ struct GlobalMemory : public SideEffects::Resource::Base<GlobalMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 62b7cf9: SideEffects::Resource::getName() is const-qualified.
++  StringRef getName() const final { return "<GlobalMemory>"; }
++#else
+   StringRef getName() final { return "<GlobalMemory>"; }
++#endif
+ };
+ 
+ class DialectInferLayoutInterface
+diff --git a/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
+index 88dbf0129..3054b3575 100644
+--- a/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
+@@ -93,7 +93,11 @@ using LinearEncodingCache = Cache<CacheKey, LinearEncodingAttr>;
+ 
+ namespace mlir::triton::gpu {
+ struct SharedMemory : public SideEffects::Resource::Base<SharedMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  StringRef getName() const final { return "<SharedMemory>"; }
++#else
+   StringRef getName() final { return "<SharedMemory>"; }
++#endif
+ };
+ 
+ // Convert a distributed layout to a linear encoding
+diff --git a/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
+index 8bb0a59f7..6f533a60e 100644
+--- a/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
+@@ -51,7 +51,11 @@ LogicalResult verifyMMAv5Op(Operation *op);
+ namespace mlir::triton::nvidia_gpu {
+ 
+ struct TensorMemory : public SideEffects::Resource::Base<TensorMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  StringRef getName() const final { return "<TensorMemory>"; }
++#else
+   StringRef getName() final { return "<TensorMemory>"; }
++#endif
+ };
+ 
+ struct TMemAllocation {
 diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
 index b3f5cf9a2..5afeb482c 100644
 --- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
