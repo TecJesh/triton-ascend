@@ -8,7 +8,12 @@ ADD "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
-RUN dnf install --assumeyes llvm-toolset
+# Pin a modern clang: the unversioned 'llvm-toolset' on EL8 resolves to an
+# ancient default stream whose clang ICEs on current MLIR sources
+# (e.g. BuiltinDialectBytecode.cpp).  The community llvm-build workflow
+# uses llvm-toolset-20.1.8 from the AlmaLinux 8 AppStream for the same
+# baseline era.
+RUN dnf install --assumeyes llvm-toolset-20.1.8
 RUN dnf install --assumeyes python39-pip python39-devel git
 RUN alternatives --set python3 /usr/bin/python3.9
 
