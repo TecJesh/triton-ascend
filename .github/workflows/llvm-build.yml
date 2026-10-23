@@ -215,7 +215,7 @@ jobs:
           ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
 
     - name: Setup obsutil and upload to OBS
-      if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
       shell: bash
       env:
         AK: ${{ secrets.OBS_AK }}
