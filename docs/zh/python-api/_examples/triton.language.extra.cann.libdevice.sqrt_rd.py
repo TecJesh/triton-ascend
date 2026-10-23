@@ -9,7 +9,7 @@ import triton.language.extra.cann.libdevice as libdevice
 import torch
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
-_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 
@@ -41,7 +41,7 @@ def test_sqrt_rd():
     triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
     output = output.cpu()
     expected = expected.cpu()
-    torch.testing.assert_close(output, expected, rtol=1e-02, atol=1e-02, equal_nan=True)
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":

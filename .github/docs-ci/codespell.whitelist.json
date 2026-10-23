@@ -250,5 +250,8 @@
   "TTGIR",
   "ttgir",
   "upstreamed",
-  "manylinux"
+  "manylinux",
+  "shmem",
+  "SHMEM",
+  "msdebug"
 ]

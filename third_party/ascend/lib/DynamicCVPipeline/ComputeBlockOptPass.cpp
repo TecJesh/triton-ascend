@@ -25,6 +25,7 @@
 #include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/MergeCubeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 
@@ -52,9 +53,9 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createMergeVectorIfBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
-  pm.addPass(createMergeCubeForBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
+  pm.addPass(createExpLoadPatternPass());
   pm.addPass(createUBUsageOptPass());
   pm.addPass(createBroadcastUBOptPass());
   pm.addPass(createPosMaskPatternPass());
@@ -76,6 +77,12 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
+  pm.addPass(createMergeComputeBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+
+  pm.addPass(createMergeCubeBlockPass());
+  pm.addPass(createMergeInputInitSharedCubeBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createRelocateMemrefDeclPass());
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
@@ -100,16 +107,19 @@ void registerComputeBlockOptPasses() {
   registerPass(createMergeSameSourceAxisPass);
   registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
-  registerPass(createMergeCubeForBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
   registerPass(createExpSubfPatternPass);
+  registerPass(createExpLoadPatternPass);
   registerPass(createSinkI1ProducersIntoUsersPass);
   registerPass(createBroadcastUBOptPass);
   registerPass(createMoveLoadIntoUserPass);
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);
+  registerPass(createMergeComputeBlockPass);
+  registerPass(createMergeInputInitSharedCubeBlockPass);
+  registerPass(createMergeCubeBlockPass);
   registerPass(createRelocateMemrefDeclPass);
 }
 

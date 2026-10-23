@@ -34,7 +34,8 @@ ENV MAX_JOBS=${MAX_JOBS} \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
-    IS_MANYLINUX=TRUE
+    IS_MANYLINUX=TRUE \
+    SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 
 # ---------------------------------------------------------------------------
 # Install setuptools + wheel for the target Python (not pre-installed in
