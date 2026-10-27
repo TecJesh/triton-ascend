@@ -1369,7 +1369,7 @@ index 0f506818f..9961a4eb2 100644
      # compute argument string for a given parameter
      arg = lambda x: x[0] if x[1].default is inspect.Parameter.empty else f"{x[0]}=default_{x[0]}"
 +    alignment_specialization_init = (f"    {alignment_specialization_name} = "
-+                                     "backend.use_alignment_specialization(options)\n"
++                                     "backend.use_alignment_specialization(options) if hasattr(backend, 'use_alignment_specialization') else True\n"
 +                                     if uses_alignment_specialization else "")
      func_body = f"""
  def dynamic_func({", ".join(list(map(arg, sig.parameters.items())) + ["**options"])}):
