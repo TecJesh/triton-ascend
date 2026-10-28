@@ -52,7 +52,6 @@ def test_npu_tensor_should_success():
     torch.testing.assert_close(expected, actual, rtol=1e-03, atol=1e-03)
 
 
-@pytest.mark.skip(reason="The launcher is optimized.and the CPU tensor check is removed.")
 def test_cpu_tensor_should_fail():
     print("Test the CPU tensor. An address check exception should be raised.")
     size = 1024
@@ -66,3 +65,19 @@ def test_cpu_tensor_should_fail():
     error_msg = str(exc_info.value)
     assert "cannot be accessed from Triton (cpu tensor?)" in error_msg, \
         f"Expected error message to contain CPU tensor rejection hint, but got: {error_msg}"
+
+
+@pytest.mark.parametrize("device", ['npu', 'cpu', 'cpu_pinned'])
+def test_pointer_arguments(device):
+
+    @triton.jit
+    def kernel(x):
+        pass
+
+    pin_memory = 'pinned' in device
+    x = torch.empty(1024, device=device.split('_')[0], pin_memory=pin_memory)
+    if device == "cpu":
+        with pytest.raises(ValueError):
+            kernel[(1, )](x)
+    else:
+        kernel[(1, )](x)

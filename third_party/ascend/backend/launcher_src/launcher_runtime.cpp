@@ -338,13 +338,66 @@ void translateException() {
   }
 }
 
+static bool checkPointerDevice(PyObject *obj, int idx) {
+  static PyObject *deviceKey = PyUnicode_InternFromString("device");
+  static PyObject *typeKey = PyUnicode_InternFromString("type");
+  static PyObject *pinnedKey = PyUnicode_InternFromString("is_pinned");
+  static PyObject *npuType = PyUnicode_InternFromString("npu");
+  static PyObject *cpuType = PyUnicode_InternFromString("cpu");
+  if (!deviceKey || !typeKey || !pinnedKey || !npuType || !cpuType)
+    return false;
+  PyObject *device = PyObject_GetAttr(obj, deviceKey);
+  if (!device) {
+    // Objects without a device attribute are not tensors; skip validation.
+    PyErr_Clear();
+    return true;
+  }
+  PyObject *type = PyObject_GetAttr(device, typeKey);
+  Py_DECREF(device);
+  if (!type) {
+    // e.g. MindSpore Tensor.device is a string; leave validation to the
+    // runtime.
+    PyErr_Clear();
+    return true;
+  }
+  int isNpu = PyObject_RichCompareBool(type, npuType, Py_EQ);
+  if (isNpu < 0) {
+    Py_DECREF(type);
+    return false;
+  }
+  if (isNpu) {
+    Py_DECREF(type);
+    return true;
+  }
+  int isCpu = PyObject_RichCompareBool(type, cpuType, Py_EQ);
+  Py_DECREF(type);
+  if (isCpu < 0)
+    return false;
+  if (isCpu) {
+    PyObject *pinned = PyObject_CallMethodNoArgs(obj, pinnedKey);
+    if (pinned) {
+      bool allowed = PyObject_IsTrue(pinned);
+      Py_DECREF(pinned);
+      if (allowed)
+        return true;
+    } else {
+      PyErr_Clear();
+    }
+  }
+  PyErr_Format(
+      PyExc_ValueError,
+      "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)",
+      idx);
+  return false;
+}
+
 // These CPython numeric conversion APIs report errors with a -1 sentinel.
 // Query the error indicator only for that value, including valid -1 inputs.
 template <typename T> bool conversionFailed(T value) {
   return value == static_cast<T>(-1) && PyErr_Occurred();
 }
 
-bool pointerValue(PyObject *obj, void **value) {
+bool pointerValue(PyObject *obj, int idx, void **value) {
   *value = nullptr;
   if (obj == Py_None)
     return true;
@@ -369,8 +422,12 @@ bool pointerValue(PyObject *obj, void **value) {
   auto address = PyLong_AsUnsignedLongLong(result);
   bool valid = !conversionFailed(address);
   Py_DECREF(result);
+  if (!valid)
+    return false;
+  if (address && !checkPointerDevice(obj, idx))
+    return false;
   *value = reinterpret_cast<void *>(address);
-  return valid;
+  return true;
 }
 
 template <typename T> void storeValue(char *out, T value) {
@@ -384,11 +441,11 @@ template <typename T, typename U> bool storeConverted(char *out, U value) {
   return true;
 }
 
-bool convertArgument(PyObject *obj, uint32_t kind, char *out) {
+bool convertArgument(PyObject *obj, uint32_t kind, int idx, char *out) {
   switch (kind) {
   case TRITON_NPU_POINTER: {
     void *value;
-    if (!pointerValue(obj, &value))
+    if (!pointerValue(obj, idx, &value))
       return false;
     storeValue(out, value);
     return true;
@@ -526,7 +583,8 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     size_t tensor = 0;
     for (const auto &slot : layout.args) {
       PyObject *obj = args[9 + slot.input];
-      if (!convertArgument(obj, slot.kind, call->data() + slot.offset))
+      if (!convertArgument(obj, slot.kind, slot.input,
+                           call->data() + slot.offset))
         return nullptr;
       if (profile && slot.kind == TRITON_NPU_POINTER) {
         int kind = 0;
