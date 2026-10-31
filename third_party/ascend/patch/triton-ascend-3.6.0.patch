@@ -1450,3 +1450,66 @@ index 0f506818f..9961a4eb2 100644
              # launch kernel
              launch_metadata = kernel.launch_metadata(grid, stream, *bound_args.values())
              kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
+index 73085d3d3160..ee5eb6410dcd 100644
+--- a/python/triton/tools/compile.py
++++ b/python/triton/tools/compile.py
+@@ -194,6 +194,29 @@ def compile_kernel(args: CompileArgs):
+         "_placeholder": "",
+         "warp_size": target.warp_size,
+     }
++    if target.backend == "npu":
++        # NPU AOT: export the fixed C launcher next to the C stubs and adapt
++        # template parameters to the launcher ABI (no scratch pointer args).
++        import shutil
++
++        from triton.backends.ascend import launcher
++        from triton.backends.ascend.driver import NPUUtils
++
++        npu_utils = NPUUtils()
++        spec = launcher.make_launch_spec(ccinfo.metadata, npu_utils)
++        index = lambda name: kernel.arg_names.index(name)
++        types = launcher.argument_types({index(name): ty for name, ty in signature.items()},
++                                        {index(name) for name in constants})
++        _, runtime_path = launcher.get_runtime(npu_utils.get_so_path())
++        shutil.copy(launcher.export_launcher(spec, types, runtime_path),
++                    out_path.parent / "launcher_export.so")
++        params["register_kernel_name"] = ccinfo.metadata.kernel_name
++        params["packed_kernel_name"] = ccinfo.packed_metadata["kernel_name"]
++        params["magic"] = ("RT_DEV_BINARY_MAGIC_ELF_AIVEC"
++                           if ccinfo.metadata.mix_mode == "aiv" else "RT_DEV_BINARY_MAGIC_ELF")
++        params["arg_pointers"] = ", ".join([f"&{arg}" for arg in arg_names_not_1])
++        params["arg_sizes"] = ", ".join([f"sizeof({arg})" for arg in arg_names_not_1])
++        params["num_args"] = len(arg_names_not_1)
+     output_files = []
+     backend_name = target.backend
+     template_dir = Path(__file__).parent / "extra" / backend_name
+diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
+index 75a1157a52f9..a86605bfaf6a 100644
+--- a/python/triton/tools/link.py
++++ b/python/triton/tools/link.py
+@@ -36,7 +36,7 @@ class HeaderParser:
+         # [name, hash, suffix]
+         self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
+         # [(type, name)]
+-        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
++        self.c_sig = re.compile("[\\s]*(\\w+\\*?)\\s+(\\w+)[,]?")
+         # [d|c]
+         self.arg_suffix = re.compile("[c,d]")
+ 
+@@ -174,8 +174,13 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+             if hint == 1  #
+             else None)
+         conds = " && ".join([  #
+-            cond_fn(val, hint)  #
+-            for val, hint in zip(meta.arg_names, meta.sizes)  #
++            # Pointer arguments (e.g. the NPU "void*" spelling) cannot take
++            # integer arithmetic directly; cast their address through
++            # uintptr_t for the divisibility/equality dispatch checks.
++            (f"((uintptr_t){val} % {hint} == 0)" if ty == "void*" and hint == 16 else
++             f"((uintptr_t){val} == {hint})" if ty == "void*" else
++             cond_fn(val, hint))  #
++            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
+             if hint is not None
+         ])
+         src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"

@@ -161,6 +161,8 @@ def get_triton_ascend_patch_file():
         "python/triton/runtime/interpreter.py",
         "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",
+        "python/triton/tools/compile.py",
+        "python/triton/tools/link.py",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
         "bin/CMakeLists.txt",
@@ -707,6 +709,24 @@ def _build_setup_kwargs(mod, kwargs):
     return kwargs
 
 
+def _copy_npu_aot_templates():
+    """Stage the NPU AOT C-launcher templates into the packaged tools dir.
+
+    The AOT CLI looks the templates up under ``triton/tools/extra/<backend>``
+    inside the installed package, while the sources live in
+    ``third_party/ascend/tools`` (``python/triton/tools/extra`` is gitignored
+    upstream content). Run before build_py so the staged files ship in the
+    wheel.
+    """
+    src_dir = _REPO_ROOT / "third_party" / "ascend" / "tools" / "npu"
+    if not src_dir.is_dir():
+        return
+    dst_dir = _REPO_ROOT / "python" / "triton" / "tools" / "extra" / "npu"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for template in src_dir.glob("compile.*"):
+        shutil.copy2(template, dst_dir / template.name)
+
+
 def prepare():
     """Top-of-setup.py hook: defaults and optional npuir/distributed sources."""
     _set_default_env_vars()
@@ -718,6 +738,7 @@ def prepare():
     # their own sources, and ON mode goes through build_npuir() below.
     _ensure_npuir_payload()
     _ensure_distributed_submodule()
+    _copy_npu_aot_templates()
 
 
 def activate():

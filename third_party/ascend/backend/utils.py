@@ -747,6 +747,13 @@ def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, 
     return cc_cmd, so_path
 
 
+@functools.lru_cache(maxsize=1)
+def _torch_library_dirs():
+    from torch.utils.cpp_extension import library_paths
+
+    return tuple(library_paths())
+
+
 @functools.lru_cache(maxsize=32)
 def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_header, policy):
     """Process-stable Python/framework include and ABI options for a CANN root.
@@ -784,6 +791,14 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
             cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
         else:
             cc_cmd += get_backend_func("get_cc_cmd")
+
+    # The launcher artifacts (npu_utils, the launcher runtime and the exported
+    # adapter) are dlopened from plain C processes in the AOT flow, which have
+    # no Python process to provide the torch extension libraries
+    # (libtorch_python.so etc.); bake an rpath to torch's library dirs so the
+    # artifacts stay loadable without LD_LIBRARY_PATH hacks.
+    for lib_dir in _torch_library_dirs():
+        cc_cmd.append(f"-Wl,-rpath,{lib_dir}")
 
     return tuple(cc_cmd)
 

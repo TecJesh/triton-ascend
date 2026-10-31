@@ -551,6 +551,11 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
+    # Profile scratch is a proton instrumentation feature of the NV/AMD
+    # backends; NPU kernels never request it. Export the same metadata keys so
+    # tools that read them unconditionally (e.g. triton.tools.compile) work.
+    metadata["profile_scratch_size"] = 0
+    metadata["profile_scratch_align"] = 1
     module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
     metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module
@@ -607,6 +612,11 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
+    # Profile scratch is a proton instrumentation feature of the NV/AMD
+    # backends; NPU kernels never request it. Export the same metadata keys so
+    # tools that read them unconditionally (e.g. triton.tools.compile) work.
+    metadata["profile_scratch_size"] = 0
+    metadata["profile_scratch_align"] = 1
     # Note: Currently, for TTIR inputs, we only support vector kernels.
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)

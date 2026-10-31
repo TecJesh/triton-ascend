@@ -4,6 +4,7 @@ import pytest
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 
 import numpy as np
@@ -12,6 +13,12 @@ import triton
 from triton.backends.compiler import GPUTarget
 from triton.backends.nvidia.driver import include_dirs, library_dirs
 from triton._internal_testing import is_cuda, is_hip
+
+
+def is_npu():
+    target = triton.runtime.driver.active.get_current_target()
+    return target is not None and target.backend == "npu"
+
 
 kernel_utils_src = """
 import triton
@@ -203,6 +210,144 @@ int main(int argc, char **argv) {{
     subprocess.run(command, check=True, cwd=dir)
 
 
+def _npu_toolchain():
+    """Reuse the ascend backend's own NPU extension compile/link flags.
+
+    These are the same flags used to build npu_utils and the launcher
+    runtime, so the AOT C harness always matches the installed toolchain
+    (CANN include/lib layout, torch_npu paths and ABI defines) without
+    hard-coding any path.
+    """
+    from triton.backends.ascend import utils as ascend_utils
+
+    asc_path = str(ascend_utils._get_ascend_path())
+    has_runtime_header = os.path.exists(os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h"))
+    flags = list(
+        ascend_utils._npu_ext_build_options("npu_utils", "torch", asc_path, has_runtime_header,
+                                            ascend_utils.backend_policy))
+    include_flags = [flag for flag in flags if flag.startswith(("-I", "-D", "-w"))]
+    link_flags = [flag for flag in flags if flag.startswith(("-L", "-l"))]
+    lib_dirs = [flag[2:] for flag in link_flags if flag.startswith("-L")]
+    # The launcher chain (npu_utils/launcher runtime .so) links torch
+    # extension libraries (libtorch_python.so etc.); the plain C test
+    # process must be able to load them, so extend the search path with
+    # torch's library dirs.
+    from torch.utils.cpp_extension import library_paths
+
+    lib_dirs += [lib_dir for lib_dir in library_paths() if lib_dir not in lib_dirs]
+    python_libdir = sysconfig.get_config_var("LIBDIR")
+    python_lib = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    ld_library_path = [*lib_dirs] + ([python_libdir] if python_libdir else [])
+    return include_flags, link_flags, lib_dirs, python_libdir, python_lib, ld_library_path
+
+
+def gen_kernel_library_npu(dir, libname):
+    include_flags, link_flags, lib_dirs, _, _, _ = _npu_toolchain()
+    c_files = glob.glob(os.path.join(dir, "*.c"))
+    # Compile each generated launcher source, then link the shared library
+    # against the CANN/torch_npu runtime libs its rt*/aclrt* calls need
+    # (they are referenced, so --as-needed keeps them).
+    subprocess.run(
+        ["gcc"] + c_files + ["-I", include_dirs[0], *include_flags, "-c", "-fPIC"],
+        check=True,
+        cwd=dir,
+    )
+    o_files = glob.glob(os.path.join(dir, "*.o"))
+    command = ["gcc", *o_files, "-shared", "-o", libname]
+    for lib_dir in lib_dirs:
+        command += [f"-L{lib_dir}", f"-Wl,-rpath,{lib_dir}"]
+    command += link_flags + ["-ldl"]
+    subprocess.run(command, check=True, cwd=dir)
+
+
+def gen_test_bin_npu(dir, M, N, K, exe="test", algo_id=0):
+    test_src = f"""
+int main(int argc, char **argv) {{
+  int M = {M}, N = {N}, K = {K};
+
+  // initialize ACL handles
+  aclrtStream stream = NULL;
+  void *A = NULL, *B = NULL, *C = NULL;
+  aclError err = 0;
+  aclInit(NULL);
+  int32_t device_id = 0;
+  aclrtSetDevice(device_id);
+  aclrtMalloc(&A, M * K * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&B, K * N * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&C, M * N * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtCreateStream(&stream);
+  load_matmul_fp16();
+
+  // initialize input data
+  int16_t hA[M*K];
+  int16_t hB[K*N];
+  memset(hA, 0, M*K*2);
+  memset(hB, 0, K*N*2);
+  read_csv_to_buffer(argv[1], hA, M*K);
+  read_csv_to_buffer(argv[2], hB, K*N);
+  aclrtMemcpyAsync(A, M*K*2, hA, M*K*2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtMemcpyAsync(B, K*N*2, hB, K*N*2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtSynchronizeStream(stream);
+
+  // launch kernel
+  int ret;
+  int algo_id = {algo_id};
+  if (algo_id == 0) {{
+    ret = matmul_fp16_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
+  }} else {{
+    ret = matmul_fp16(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1, {algo_id});
+  }}
+  if (ret != 0) fprintf(stderr, "kernel launch failed\\n");
+  assert(ret == 0);
+  aclrtSynchronizeStream(stream);
+
+  // read data
+  int32_t hC[M*N];
+  memset(hC, 0, M*N*4);
+  aclrtMemcpyAsync(hC, M*N*4, C, M*N*4, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtSynchronizeStream(stream);
+  write_buffer_to_csv(argv[3], hC, M*N);
+
+  // free acl handles
+  unload_matmul_fp16();
+  aclrtFree(A);
+  aclrtFree(B);
+  aclrtFree(C);
+  aclrtDestroyStream(stream);
+  aclFinalize();
+}}
+"""
+    src = test_utils_src.replace("#include <cuda.h>", "#include <acl/acl.h>") + test_src
+    with open(os.path.join(dir, "test.c"), "w") as file:
+        file.write(src)
+
+    include_flags, link_flags, lib_dirs, python_libdir, python_lib, _ = _npu_toolchain()
+    command = ["gcc", "test.c"]
+    for inc_dir in include_dirs:
+        command.extend(["-I", inc_dir])
+    command.extend(include_flags)
+    # The backend's link flags already carry the right -L/-l order. Keep
+    # libpython in DT_NEEDED even though test.c never references it
+    # directly: --as-needed would otherwise drop it, and the launcher
+    # artifacts need Python data symbols in the process when dlopened.
+    command.extend(link_flags)
+    if python_libdir:
+        command += [f"-L{python_libdir}", f"-Wl,-rpath,{python_libdir}"]
+    for lib_dir in lib_dirs:
+        command += [f"-Wl,-rpath,{lib_dir}"]
+    command += [
+        "-Wl,--no-as-needed", f"-l{python_lib}", "-Wl,--as-needed", "-ldl", "-L", dir, "-l", "kernel", "-o", exe
+    ]
+    subprocess.run(command, check=True, cwd=dir)
+
+
+def _npu_run_env(tmp_dir):
+    _, _, _, _, _, ld_library_path = _npu_toolchain()
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = os.pathsep.join([tmp_dir, *ld_library_path, env.get("LD_LIBRARY_PATH", "")])
+    return env
+
+
 def write_triton_kernels(dir, src, util_src):
     kernel_path = os.path.join(dir, "kernel.py")
     with open(kernel_path, "w") as file:
@@ -323,6 +468,26 @@ def test_compile_link_matmul_no_specialization():
         if is_hip():
             check_hasco_binary_str(tmp_dir, dtype)
             return
+        if is_npu():
+            link_aot_kernels(tmp_dir)
+
+            # compile test case
+            M, N, K = 16, 16, 16
+            gen_kernel_library_npu(tmp_dir, "libkernel.so")
+            gen_test_bin_npu(tmp_dir, M, N, K)
+
+            # initialize test data
+            a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, M, N, K)
+
+            # run test case
+            subprocess.run(["./test", a_path, b_path, c_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+            # read data and compare against reference
+            c = np.genfromtxt(c_path, delimiter=",", dtype=np.int32)
+            c_tri = c.reshape((M, N)).view(np.float32)
+            c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+            np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+            return
 
         link_aot_kernels(tmp_dir)
 
@@ -358,6 +523,26 @@ def test_compile_link_matmul():
         if is_hip():
             check_hasco_binary_str(tmp_dir, dtype)
             return
+        if is_npu():
+            link_aot_kernels(tmp_dir)
+
+            # compile test case
+            M, N, K = 16, 16, 16
+            gen_kernel_library_npu(tmp_dir, "libkernel.so")
+            gen_test_bin_npu(tmp_dir, M, N, K)
+
+            # initialize test data
+            a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, M, N, K)
+
+            # run test case
+            subprocess.run(["./test", a_path, b_path, c_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+            # read data and compare against reference
+            c = np.genfromtxt(c_path, delimiter=",", dtype=np.int32)
+            c_tri = c.reshape((M, N)).view(np.float32)
+            c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+            np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+            return
         link_aot_kernels(tmp_dir)
 
         # compile test case
@@ -391,6 +576,30 @@ def test_launcher_has_no_available_kernel():
         compile_aot_kernels(tmp_dir, kernel_path, dtype, BM, BN, BK, ha_hb_hints=[(":1", ":1")])
         if is_hip():
             check_hasco_binary_str(tmp_dir, dtype)
+            return
+        if is_npu():
+            link_aot_kernels(tmp_dir)
+
+            # compile test case
+            M, N, K = 16, 16, 16
+            gen_kernel_library_npu(tmp_dir, "libkernel.so")
+            gen_test_bin_npu(tmp_dir, M, N, K)
+
+            # initialize test data
+            a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, M, N, K)
+
+            # run test case
+            result = subprocess.run(
+                ["./test", a_path, b_path, c_path],
+                env=_npu_run_env(tmp_dir),
+                cwd=tmp_dir,
+                capture_output=True,
+                text=True,
+            )
+
+            # It should fail since the launcher requires all the strides be 1 while they are not.
+            assert result.returncode == -6
+            assert "kernel launch failed" in result.stderr
             return
 
         link_aot_kernels(tmp_dir)
