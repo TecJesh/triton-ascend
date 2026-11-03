@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
+#include "ascend/include/TritonToLinalg/AccResetSelectConverter.h"
 #include <cstdint>
 #include <limits>
 
@@ -234,4 +235,5 @@ private:
 void TTOpConverters::populatePostConversionCanonicalizationPatterns(
     RewritePatternSet &patterns) {
   patterns.add<FoldOneHotGatherAfterReduceWithIndex>(patterns.getContext());
+  patterns.add<AccResetSelectConverter>(patterns.getContext());
 }
