@@ -248,7 +248,7 @@ def gen_kernel_library_npu(dir, libname):
     # against the CANN/torch_npu runtime libs its rt*/aclrt* calls need
     # (they are referenced, so --as-needed keeps them).
     subprocess.run(
-        ["gcc"] + c_files + ["-I", include_dirs[0], *include_flags, "-c", "-fPIC"],
+        ["gcc"] + c_files + include_flags + ["-c", "-fPIC"],
         check=True,
         cwd=dir,
     )
@@ -323,8 +323,6 @@ int main(int argc, char **argv) {{
 
     include_flags, link_flags, lib_dirs, python_libdir, python_lib, _ = _npu_toolchain()
     command = ["gcc", "test.c"]
-    for inc_dir in include_dirs:
-        command.extend(["-I", inc_dir])
     command.extend(include_flags)
     # The backend's link flags already carry the right -L/-l order. Keep
     # libpython in DT_NEEDED even though test.c never references it
@@ -427,7 +425,12 @@ def link_aot_kernels(dir):
 
     # link all desired configs
     h_files = glob.glob(os.path.join(dir, "*.h"))
-    subprocess.run([sys.executable, linker_path] + h_files + ["-o", "kernel"], check=True, cwd=dir)
+    cmd = [sys.executable, linker_path] + h_files + ["-o", "kernel"]
+    if is_npu():
+        # NPU headers use ACL types instead of CUDA's; link.py emits
+        # self-contained CUresult/CUstream stand-ins in that mode.
+        cmd += ["--backend", "npu"]
+    subprocess.run(cmd, check=True, cwd=dir)
 
 
 def generate_matmul_test_data(dir, M, N, K):
@@ -469,6 +472,7 @@ def test_compile_link_matmul_no_specialization():
             check_hasco_binary_str(tmp_dir, dtype)
             return
         if is_npu():
+            print("GGGGGGGGGGGGGGG")
             link_aot_kernels(tmp_dir)
 
             # compile test case
