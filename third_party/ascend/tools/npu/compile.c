@@ -5,7 +5,7 @@
 #include <dlfcn.h>
 #include <acl/acl.h>
 #include <runtime/runtime/rt.h>
-#include <cuda.h>
+// #include <cuda.h>
 
 // helpers to check for acl errors
 #define ACL_CHECK(ans) {{\
