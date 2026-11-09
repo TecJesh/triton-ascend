@@ -5,16 +5,16 @@
 #include <dlfcn.h>
 #include <acl/acl.h>
 #include <runtime/runtime/rt.h>
-// Stand-ins for CUresult/CUstream: the NPU AOT C API reuses the CUDA type
-// names but must not depend on <cuda.h>, which NPU machines do not have.
+// Stand-in NPU result/stream types for the AOT C API: the template must not
+// depend on <cuda.h>, which NPU machines do not have.
 // Guarded so the per-kernel headers and the link.py kernel.h can coexist.
 #ifndef TT_AOT_KERNEL_TYPES
 #define TT_AOT_KERNEL_TYPES
-typedef int CUresult;
-typedef void *CUstream;
-#define CUDA_SUCCESS 0
-#define CUDA_ERROR_UNKNOWN 1
-#define CUDA_ERROR_INVALID_VALUE 2
+typedef int NPUresult;
+typedef void *NPUstream;
+#define ASCEND_SUCCESS 0
+#define ASCEND_ERROR_UNKNOWN 1
+#define ASCEND_ERROR_INVALID_VALUE 2
 #endif
 
 // helpers to check for acl errors
@@ -93,7 +93,7 @@ typedef void (*triton_launch_kernel_t)(const char *name, void *function,
 /*
 {kernel_docstring}
 */
-CUresult {kernel_name}(CUstream stream, {signature}) {{
+NPUresult {kernel_name}(NPUstream stream, {signature}) {{
     if ({kernel_name}_func == NULL)
        load_{kernel_name}();
     static void *lib_handle = NULL;
@@ -102,17 +102,17 @@ CUresult {kernel_name}(CUstream stream, {signature}) {{
         lib_handle = dlopen("launcher_export.so", RTLD_LAZY | RTLD_LOCAL);
         if (lib_handle == NULL) {{
             printf("Triton Error [NPU]: cannot dlopen launcher_export.so: %s\n", dlerror());
-            return CUDA_ERROR_UNKNOWN;
+            return ASCEND_ERROR_UNKNOWN;
         }}
         launch = (triton_launch_kernel_t)dlsym(lib_handle, "triton_launch_kernel");
         if (launch == NULL) {{
             printf("Triton Error [NPU]: cannot resolve triton_launch_kernel\n");
-            return CUDA_ERROR_UNKNOWN;
+            return ASCEND_ERROR_UNKNOWN;
         }}
     }}
     void *args[{num_args}] = {{ {arg_pointers} }};
     size_t arg_sizes[{num_args}] = {{ {arg_sizes} }};
     launch("{packed_kernel_name}", {kernel_name}_func, stream, {gridX}, {gridY}, {gridZ},
            NULL, NULL, 0, NULL, args, arg_sizes, {num_args});
-    return CUDA_SUCCESS;
+    return ASCEND_SUCCESS;
 }}

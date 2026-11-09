@@ -1505,7 +1505,19 @@ diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
 index 75a1157a52f9..a86605bfaf6a 100644
 --- a/python/triton/tools/link.py
 +++ b/python/triton/tools/link.py
-@@ -36,7 +36,7 @@ class HeaderParser:
+@@ -5,6 +5,11 @@ from typing import Sequence, Union
+ from dataclasses import dataclass
+ 
+ 
++result_t = "CUresult"
++stream_t = "CUstream"
++invalid_value_t = "CUDA_ERROR_INVALID_VALUE"
++
++
+ def _exists(x):
+     return x is not None
+ 
+@@ -36,7 +41,7 @@ class HeaderParser:
          # [name, hash, suffix]
          self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
          # [(type, name)]
@@ -1514,7 +1526,49 @@ index 75a1157a52f9..a86605bfaf6a 100644
          # [d|c]
          self.arg_suffix = re.compile("[c,d]")
  
-@@ -174,8 +174,13 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+@@ -133,7 +138,7 @@ def gen_signature(m):
+ # generate declarations of kernels with meta-parameter and constant values
+ def make_algo_decls(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
+     return f"""
+-CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])});
++{result_t} {name}({stream_t} stream, {gen_signature_with_full_args(metas[-1])});
+ void load_{name}();
+ void unload_{name}();
+     """
+@@ -142,8 +147,8 @@ void unload_{name}();
+ # generate declarations of kernels with meta-parameter and constant values
+ def make_global_decl(meta: KernelLinkerMeta) -> str:
+     return f"""
+-CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)});
+-CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id);
++{result_t} {meta.orig_kernel_name}_default({stream_t} stream, {gen_signature_with_full_args(meta)});
++{result_t} {meta.orig_kernel_name}({stream_t} stream, {gen_signature_with_full_args(meta)}, int algo_id);
+ void load_{meta.orig_kernel_name}();
+ void unload_{meta.orig_kernel_name}();
+     """
+@@ -151,7 +156,7 @@ void unload_{meta.orig_kernel_name}();
+ 
+ # generate dispatcher function for kernels with different meta-parameter and constant values
+ def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
+-    src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)}){{\n"
++    src = f"{result_t} {meta.orig_kernel_name}_default({stream_t} stream, {gen_signature_with_full_args(meta)}){{\n"
+     src += (f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n")
+     src += "}\n"
+     return src
+@@ -161,10 +166,10 @@ def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
+ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
+     src = f"// launcher for: {name}\n"
+     for meta in sorted(metas, key=lambda m: -m.num_specs):
+-        src += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {gen_signature(meta)});\n"
++        src += f"{result_t} {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}({stream_t} stream, {gen_signature(meta)});\n"
+     src += "\n"
+ 
+-    src += (f"CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])}){{")
++    src += (f"{result_t} {name}({stream_t} stream, {gen_signature_with_full_args(metas[-1])}){{")
+     src += "\n"
+     for meta in sorted(metas, key=lambda m: -m.num_specs):
+         cond_fn = (  #
+@@ -174,8 +179,13 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
              if hint == 1  #
              else None)
          conds = " && ".join([  #
@@ -1530,11 +1584,34 @@ index 75a1157a52f9..a86605bfaf6a 100644
              if hint is not None
          ])
          src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
-@@ -264,8 +269,14 @@ if __name__ == "__main__":
-     parser.add_argument("--out", "-o", type=Path, help="Out filename")
-     parser.add_argument(
-         "--prefix",
-         type=str,
+@@ -183,7 +193,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+         arg_names = [arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1]
+         src += f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
+     src += "\n"
+-    src += "  return CUDA_ERROR_INVALID_VALUE;\n"
++    src += f"  return {invalid_value_t};\n"
+     src += "}\n"
+ 
+     for mode in ["load", "unload"]:
+@@ -200,7 +210,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+ 
+ # generate dispatcher function for kernels with different meta-parameter and constant values
+ def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
+-    src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
++    src = f"{result_t} {meta.orig_kernel_name}({stream_t} stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
+     src += f"  assert (algo_id < (int)sizeof({meta.orig_kernel_name}_kernels));\n"
+     src += f"  return {meta.orig_kernel_name}_kernels[algo_id](stream, {', '.join(meta.arg_names)});\n"
+     src += "}\n"
+@@ -210,7 +220,7 @@ def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
+ # generate definition of function pointers of kernel dispatchers based on meta-parameter and constant values
+ def make_func_pointers(names: str, meta: KernelLinkerMeta) -> str:
+     # the table of hint dispatchers
+-    src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {gen_signature_with_full_args(meta)});\n"
++    src = f"typedef {result_t} (*kernel_func_t)({stream_t} stream, {gen_signature_with_full_args(meta)});\n"
+     src += f"kernel_func_t {meta.orig_kernel_name}_kernels[] = {{\n"
+     for name in names:
+         src += f"  {name},\n"
+@@ -268,7 +278,16 @@ if __name__ == "__main__":
          default="",
          help="String to prefix kernel dispatcher names",
      )
@@ -1542,27 +1619,35 @@ index 75a1157a52f9..a86605bfaf6a 100644
 +        "--backend",
 +        type=str,
 +        default="cuda",
-+        help="Backend of the headers being linked (cuda|hip|npu); selects how the generated code obtains CUresult/CUstream",
++        help="Backend of the headers being linked (cuda|hip|npu); selects the result/stream types of the generated code (cuda.h for cuda|hip, NPU stand-ins for npu)",
 +    )
      args = parser.parse_args()
-@@ -286,5 +297,24 @@ if __name__ == "__main__":
++    if args.backend == "npu":
++        result_t, stream_t, invalid_value_t = ("NPUresult", "NPUstream",
++                                               "ASCEND_ERROR_INVALID_VALUE")
+ 
+     # metadata
+     parser = HeaderParser()
+@@ -285,8 +304,28 @@ if __name__ == "__main__":
+     meta = meta_lists[0][0]
      get_num_algos_decl = make_get_num_algos_decl(meta)
      global_decl = make_global_decl(meta)
-+    # The generated sources borrow CUresult/CUstream for their C API surface.
-+    # CUDA/HIP provide them through <cuda.h>; the NPU toolchain ships no CUDA
-+    # headers, so emit self-contained stand-ins (guarded so the per-kernel
-+    # headers generated by compile.py can be included alongside this one).
++    # The generated sources expose a CUDA-style C API surface. CUDA/HIP
++    # obtain the result/stream types through <cuda.h>; the NPU toolchain
++    # ships no CUDA headers, so emit self-contained NPU stand-ins instead
++    # (guarded so the per-kernel headers generated by compile.py can be
++    # included alongside this one).
 +    if args.backend == "npu":
 +        c_types_include = "\n".join([
 +            "#include <stdint.h>",
 +            "",
 +            "#ifndef TT_AOT_KERNEL_TYPES",
 +            "#define TT_AOT_KERNEL_TYPES",
-+            "typedef int CUresult;",
-+            "typedef void *CUstream;",
-+            "#define CUDA_SUCCESS 0",
-+            "#define CUDA_ERROR_UNKNOWN 1",
-+            "#define CUDA_ERROR_INVALID_VALUE 2",
++            "typedef int NPUresult;",
++            "typedef void *NPUstream;",
++            "#define ASCEND_SUCCESS 0",
++            "#define ASCEND_ERROR_UNKNOWN 1",
++            "#define ASCEND_ERROR_INVALID_VALUE 2",
 +            "#endif",
 +        ])
 +    else:
@@ -1571,7 +1656,10 @@ index 75a1157a52f9..a86605bfaf6a 100644
 -        out = "#include <cuda.h>\n"
 +        out = c_types_include + "\n"
          out += "\n".join(algo_decls)
-@@ -305,6 +335,6 @@ if __name__ == "__main__":
+         out += "\n"
+         out += get_num_algos_decl
+@@ -304,7 +343,7 @@ if __name__ == "__main__":
+     default_algo_kernel = make_default_algo_kernel(meta)
      with args.out.with_suffix(".c").open("w") as fp:
          out = ""
 -        out += "#include <cuda.h>\n"
@@ -1579,3 +1667,4 @@ index 75a1157a52f9..a86605bfaf6a 100644
          out += "#include <stdint.h>\n"
          out += "#include <assert.h>\n"
          out += "\n"
+
