@@ -1454,50 +1454,16 @@ diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
 index 73085d3d3160..ee5eb6410dcd 100644
 --- a/python/triton/tools/compile.py
 +++ b/python/triton/tools/compile.py
-@@ -194,6 +194,46 @@ def compile_kernel(args: CompileArgs):
+@@ -194,6 +194,12 @@ def compile_kernel(args: CompileArgs):
          "_placeholder": "",
          "warp_size": target.warp_size,
      }
 +    if target.backend == "npu":
-+        # NPU AOT: export the fixed C launcher next to the C stubs and adapt
-+        # template parameters to the launcher ABI (no scratch pointer args).
-+        import dataclasses
-+        import shutil
++        # NPU AOT: keep upstream compile.py backend-agnostic; the launcher
++        # export and template params live in the NPU tools package.
++        from triton.tools.extra.npu.aot import prepare_params
 +
-+        from triton.backends.ascend import launcher
-+        from triton.backends.ascend.driver import NPUUtils
-+
-+        npu_utils = NPUUtils()
-+        spec = launcher.make_launch_spec(ccinfo.metadata, npu_utils)
-+        # A plain C process has no torch task queue: strip the framework-only
-+        # flag so the launcher runs the kernel directly instead of submitting
-+        # through npu_utils' OpCommand path.
-+        spec = dataclasses.replace(spec, flags=spec.flags & ~launcher.TASKQUEUE)
-+        index = lambda name: kernel.arg_names.index(name)
-+        types = launcher.argument_types({index(name): ty for name, ty in signature.items()},
-+                                        {index(name) for name in constants})
-+        _, runtime_path = launcher.get_runtime(npu_utils.get_so_path())
-+        shutil.copy(launcher.export_launcher(spec, types, runtime_path),
-+                    out_path.parent / "launcher_export.so")
-+        params["register_kernel_name"] = ccinfo.metadata.kernel_name
-+        params["packed_kernel_name"] = ccinfo.packed_metadata["kernel_name"]
-+        # CANN >= 9.1 launches kernels through aclrtLaunchKernelWithHostArgs;
-+        # the stub must register the embedded binary with the matching ACL
-+        # binary-load API: an rt-style function stub is not a valid
-+        # aclrtFuncHandle and would crash the launch.
-+        if launcher.utils.is_cann_version_at_least(9, 1, 0):
-+            params["use_acl_load"] = "1"
-+            params["acl_magic"] = ("ACL_RT_BINARY_MAGIC_ELF_VECTOR_CORE"
-+                                   if ccinfo.metadata.mix_mode == "aiv"
-+                                   else "ACL_RT_BINARY_MAGIC_ELF_AICORE")
-+        else:
-+            params["use_acl_load"] = "0"
-+            params["acl_magic"] = "ACL_RT_BINARY_MAGIC_ELF_AICORE"
-+        params["magic"] = ("RT_DEV_BINARY_MAGIC_ELF_AIVEC"
-+                           if ccinfo.metadata.mix_mode == "aiv" else "RT_DEV_BINARY_MAGIC_ELF")
-+        params["arg_pointers"] = ", ".join([f"&{arg}" for arg in arg_names_not_1])
-+        params["arg_sizes"] = ", ".join([f"sizeof({arg})" for arg in arg_names_not_1])
-+        params["num_args"] = len(arg_names_not_1)
++        prepare_params(ccinfo, kernel, signature, constants, out_path, params, arg_names_not_1)
      output_files = []
      backend_name = target.backend
      template_dir = Path(__file__).parent / "extra" / backend_name
@@ -1505,113 +1471,36 @@ diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
 index 75a1157a52f9..a86605bfaf6a 100644
 --- a/python/triton/tools/link.py
 +++ b/python/triton/tools/link.py
-@@ -5,6 +5,11 @@ from typing import Sequence, Union
+@@ -4,6 +4,8 @@ from typing import Sequence, Union
+ 
  from dataclasses import dataclass
  
++from triton.tools.extra.npu import aot
++
  
-+result_t = "CUresult"
-+stream_t = "CUstream"
-+invalid_value_t = "CUDA_ERROR_INVALID_VALUE"
-+
-+
  def _exists(x):
      return x is not None
- 
-@@ -36,7 +41,7 @@ class HeaderParser:
+@@ -36,7 +38,7 @@ class HeaderParser:
          # [name, hash, suffix]
          self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
          # [(type, name)]
 -        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
-+        self.c_sig = re.compile("[\\s]*(\\w+\\*?)\\s+(\\w+)[,]?")
++        self.c_sig = re.compile(aot.c_sig_pattern())
          # [d|c]
          self.arg_suffix = re.compile("[c,d]")
  
-@@ -133,7 +138,7 @@ def gen_signature(m):
- # generate declarations of kernels with meta-parameter and constant values
- def make_algo_decls(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
-     return f"""
--CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])});
-+{result_t} {name}({stream_t} stream, {gen_signature_with_full_args(metas[-1])});
- void load_{name}();
- void unload_{name}();
-     """
-@@ -142,8 +147,8 @@ void unload_{name}();
- # generate declarations of kernels with meta-parameter and constant values
- def make_global_decl(meta: KernelLinkerMeta) -> str:
-     return f"""
--CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)});
--CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id);
-+{result_t} {meta.orig_kernel_name}_default({stream_t} stream, {gen_signature_with_full_args(meta)});
-+{result_t} {meta.orig_kernel_name}({stream_t} stream, {gen_signature_with_full_args(meta)}, int algo_id);
- void load_{meta.orig_kernel_name}();
- void unload_{meta.orig_kernel_name}();
-     """
-@@ -151,7 +156,7 @@ void unload_{meta.orig_kernel_name}();
- 
- # generate dispatcher function for kernels with different meta-parameter and constant values
- def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
--    src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)}){{\n"
-+    src = f"{result_t} {meta.orig_kernel_name}_default({stream_t} stream, {gen_signature_with_full_args(meta)}){{\n"
-     src += (f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n")
-     src += "}\n"
-     return src
-@@ -161,10 +166,10 @@ def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
- def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
-     src = f"// launcher for: {name}\n"
-     for meta in sorted(metas, key=lambda m: -m.num_specs):
--        src += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {gen_signature(meta)});\n"
-+        src += f"{result_t} {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}({stream_t} stream, {gen_signature(meta)});\n"
-     src += "\n"
- 
--    src += (f"CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])}){{")
-+    src += (f"{result_t} {name}({stream_t} stream, {gen_signature_with_full_args(metas[-1])}){{")
-     src += "\n"
-     for meta in sorted(metas, key=lambda m: -m.num_specs):
-         cond_fn = (  #
-@@ -174,8 +179,13 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+@@ -174,8 +176,8 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
              if hint == 1  #
              else None)
          conds = " && ".join([  #
 -            cond_fn(val, hint)  #
 -            for val, hint in zip(meta.arg_names, meta.sizes)  #
-+            # Pointer arguments (e.g. the NPU "void*" spelling) cannot take
-+            # integer arithmetic directly; cast their address through
-+            # uintptr_t for the divisibility/equality dispatch checks.
-+            (f"((uintptr_t){val} % {hint} == 0)" if ty == "void*" and hint == 16 else
-+             f"((uintptr_t){val} == {hint})" if ty == "void*" else
-+             cond_fn(val, hint))  #
++            aot.hint_condition(val, hint, ty)  #
 +            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
              if hint is not None
          ])
          src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
-@@ -183,7 +193,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
-         arg_names = [arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1]
-         src += f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
-     src += "\n"
--    src += "  return CUDA_ERROR_INVALID_VALUE;\n"
-+    src += f"  return {invalid_value_t};\n"
-     src += "}\n"
- 
-     for mode in ["load", "unload"]:
-@@ -200,7 +210,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
- 
- # generate dispatcher function for kernels with different meta-parameter and constant values
- def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
--    src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
-+    src = f"{result_t} {meta.orig_kernel_name}({stream_t} stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
-     src += f"  assert (algo_id < (int)sizeof({meta.orig_kernel_name}_kernels));\n"
-     src += f"  return {meta.orig_kernel_name}_kernels[algo_id](stream, {', '.join(meta.arg_names)});\n"
-     src += "}\n"
-@@ -210,7 +220,7 @@ def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
- # generate definition of function pointers of kernel dispatchers based on meta-parameter and constant values
- def make_func_pointers(names: str, meta: KernelLinkerMeta) -> str:
-     # the table of hint dispatchers
--    src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {gen_signature_with_full_args(meta)});\n"
-+    src = f"typedef {result_t} (*kernel_func_t)({stream_t} stream, {gen_signature_with_full_args(meta)});\n"
-     src += f"kernel_func_t {meta.orig_kernel_name}_kernels[] = {{\n"
-     for name in names:
-         src += f"  {name},\n"
-@@ -268,7 +278,16 @@ if __name__ == "__main__":
+@@ -268,6 +270,12 @@ if __name__ == "__main__":
          default="",
          help="String to prefix kernel dispatcher names",
      )
@@ -1622,34 +1511,18 @@ index 75a1157a52f9..a86605bfaf6a 100644
 +        help="Backend of the headers being linked (cuda|hip|npu); selects the result/stream types of the generated code (cuda.h for cuda|hip, NPU stand-ins for npu)",
 +    )
      args = parser.parse_args()
-+    if args.backend == "npu":
-+        result_t, stream_t, invalid_value_t = ("NPUresult", "NPUstream",
-+                                               "ASCEND_ERROR_INVALID_VALUE")
  
      # metadata
-     parser = HeaderParser()
-@@ -285,8 +304,28 @@ if __name__ == "__main__":
+@@ -285,13 +293,23 @@ if __name__ == "__main__":
      meta = meta_lists[0][0]
      get_num_algos_decl = make_get_num_algos_decl(meta)
      global_decl = make_global_decl(meta)
 +    # The generated sources expose a CUDA-style C API surface. CUDA/HIP
 +    # obtain the result/stream types through <cuda.h>; the NPU toolchain
-+    # ships no CUDA headers, so emit self-contained NPU stand-ins instead
-+    # (guarded so the per-kernel headers generated by compile.py can be
-+    # included alongside this one).
++    # ships no CUDA headers, so the NPU backend supplies stand-ins and
++    # rewrites the generated type spellings.
 +    if args.backend == "npu":
-+        c_types_include = "\n".join([
-+            "#include <stdint.h>",
-+            "",
-+            "#ifndef TT_AOT_KERNEL_TYPES",
-+            "#define TT_AOT_KERNEL_TYPES",
-+            "typedef int NPUresult;",
-+            "typedef void *NPUstream;",
-+            "#define ASCEND_SUCCESS 0",
-+            "#define ASCEND_ERROR_UNKNOWN 1",
-+            "#define ASCEND_ERROR_INVALID_VALUE 2",
-+            "#endif",
-+        ])
++        c_types_include = aot.c_types_include()
 +    else:
 +        c_types_include = "#include <cuda.h>"
      with args.out.with_suffix(".h").open("w") as fp:
@@ -1658,7 +1531,14 @@ index 75a1157a52f9..a86605bfaf6a 100644
          out += "\n".join(algo_decls)
          out += "\n"
          out += get_num_algos_decl
-@@ -304,7 +343,7 @@ if __name__ == "__main__":
+         out += "\n"
+         out += global_decl
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
+ 
+     # generate source
+@@ -304,7 +322,7 @@ if __name__ == "__main__":
      default_algo_kernel = make_default_algo_kernel(meta)
      with args.out.with_suffix(".c").open("w") as fp:
          out = ""
@@ -1667,4 +1547,11 @@ index 75a1157a52f9..a86605bfaf6a 100644
          out += "#include <stdint.h>\n"
          out += "#include <assert.h>\n"
          out += "\n"
+@@ -319,4 +337,6 @@ if __name__ == "__main__":
+         out += load_unload_def
+         out += "\n"
+         out += default_algo_kernel
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
 
