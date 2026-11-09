@@ -104,7 +104,6 @@ class NPUUtils(object):
 
         import importlib.util
 
-        import torch_npu  # noqa: F401
         spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
