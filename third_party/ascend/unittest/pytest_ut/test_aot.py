@@ -81,6 +81,66 @@ def kernel(C, A, B, M, N, K,
   tl.store(c_ptrs, c)
 """
 
+vec_kernel_src = """
+import triton
+import triton.language as tl
+
+@triton.jit
+def vec_kernel(Y, X, n_elements, SCALE: tl.constexpr, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(X + offs, mask=mask, other=0.0)
+    tl.store(Y + offs, x * SCALE, mask=mask)
+"""
+
+multi_kernel_src = """
+import triton
+import triton.language as tl
+import kernel_utils
+
+@triton.jit
+def caller_kernel(Y, X, n_elements, FACTOR: tl.constexpr, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(X + offs, mask=mask, other=0.0)
+    tl.store(Y + offs, kernel_utils.mul(x, FACTOR), mask=mask)
+
+@triton.jit
+def plain_kernel(Y, X, n_elements, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(X + offs, mask=mask, other=0.0)
+    tl.store(Y + offs, x + 1.0, mask=mask)
+"""
+
+multi_kernel_same_file_src = """
+import triton
+import triton.language as tl
+
+@triton.jit
+def scale(x, factor):
+    return x * factor
+
+@triton.jit
+def caller_kernel(Y, X, n_elements, FACTOR: tl.constexpr, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(X + offs, mask=mask, other=0.0)
+    tl.store(Y + offs, scale(x, FACTOR), mask=mask)
+
+@triton.jit
+def plain_kernel(Y, X, n_elements, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(X + offs, mask=mask, other=0.0)
+    tl.store(Y + offs, x + 1.0, mask=mask)
+"""
+
 test_utils_src = """
 #include <acl/acl.h>
 #include <stdio.h>
@@ -112,6 +172,19 @@ static void read_csv_to_buffer(char *filename, int16_t *buffer, int size) {
     }
     int index = 0;
     while (fscanf(file, "%hd,", &buffer[index]) != EOF && index < size) {
+        index++;
+    }
+    fclose(file);
+}
+
+static void read_csv_to_buffer32(char *filename, int32_t *buffer, int size) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("Could not open file %s\\n", filename);
+        return;
+    }
+    int index = 0;
+    while (fscanf(file, "%d,", &buffer[index]) != EOF && index < size) {
         index++;
     }
     fclose(file);
@@ -179,7 +252,10 @@ def gen_kernel_library_npu(dir, libname):
     subprocess.run(command, check=True, cwd=dir)
 
 
-def gen_test_bin_npu(dir, M, N, K, exe="test", algo_id=0):
+def gen_test_bin_npu(dir, M, N, K, exe="test", algo_id=0, dtype="fp16", kernel_name="matmul_fp16"):
+    elem_size = 4 if dtype == "fp32" else 2
+    elem_type = "int32_t" if dtype == "fp32" else "int16_t"
+    read_fn = "read_csv_to_buffer32" if dtype == "fp32" else "read_csv_to_buffer"
     test_src = f"""
 int main(int argc, char **argv) {{
   int M = {M}, N = {N}, K = {K};
@@ -191,30 +267,30 @@ int main(int argc, char **argv) {{
   aclInit(NULL);
   int32_t device_id = 0;
   aclrtSetDevice(device_id);
-  aclrtMalloc(&A, M * K * 2, ACL_MEM_MALLOC_HUGE_FIRST);
-  aclrtMalloc(&B, K * N * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&A, M * K * {elem_size}, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&B, K * N * {elem_size}, ACL_MEM_MALLOC_HUGE_FIRST);
   aclrtMalloc(&C, M * N * 4, ACL_MEM_MALLOC_HUGE_FIRST);
   aclrtCreateStream(&stream);
-  load_matmul_fp16();
+  load_{kernel_name}();
 
   // initialize input data
-  int16_t hA[M*K];
-  int16_t hB[K*N];
-  memset(hA, 0, M*K*2);
-  memset(hB, 0, K*N*2);
-  read_csv_to_buffer(argv[1], hA, M*K);
-  read_csv_to_buffer(argv[2], hB, K*N);
-  aclrtMemcpyAsync(A, M*K*2, hA, M*K*2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
-  aclrtMemcpyAsync(B, K*N*2, hB, K*N*2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  {elem_type} hA[M*K];
+  {elem_type} hB[K*N];
+  memset(hA, 0, M*K*{elem_size});
+  memset(hB, 0, K*N*{elem_size});
+  {read_fn}(argv[1], hA, M*K);
+  {read_fn}(argv[2], hB, K*N);
+  aclrtMemcpyAsync(A, M*K*{elem_size}, hA, M*K*{elem_size}, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtMemcpyAsync(B, K*N*{elem_size}, hB, K*N*{elem_size}, ACL_MEMCPY_HOST_TO_DEVICE, stream);
   aclrtSynchronizeStream(stream);
 
   // launch kernel
   int ret;
   int algo_id = {algo_id};
   if (algo_id == 0) {{
-    ret = matmul_fp16_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
+    ret = {kernel_name}_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
   }} else {{
-    ret = matmul_fp16(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1, {algo_id});
+    ret = {kernel_name}(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1, {algo_id});
   }}
   if (ret != 0) fprintf(stderr, "kernel launch failed\\n");
   assert(ret == 0);
@@ -228,7 +304,7 @@ int main(int argc, char **argv) {{
   write_buffer_to_csv(argv[3], hC, M*N);
 
   // free acl handles
-  unload_matmul_fp16();
+  unload_{kernel_name}();
   aclrtFree(A);
   aclrtFree(B);
   aclrtFree(C);
@@ -352,14 +428,210 @@ def link_aot_kernels(dir):
     subprocess.run(cmd, check=True, cwd=dir)
 
 
-def generate_matmul_test_data(dir, M, N, K):
-    a = np.random.randn(M * K).astype(np.float16).reshape((M, K))
-    b = np.random.randn(M * K).astype(np.float16).reshape((K, N))
+def compile_aot_vec_kernel(dir, kernel_path, scale, block):
+    sig = f"*fp32, *fp32, i32, {scale}, {block}"
+    name = "vec_kernel"
+    grid = f"(n_elements + {block} - 1) / {block}, 1, 1"
+    _compile_kernel(
+        dir=dir,
+        signature=sig,
+        kernel_name="vec_kernel",
+        out_name=name,
+        out_path=name,
+        num_warps=1,
+        grid=grid,
+        kernel_path=kernel_path,
+    )
+
+
+def gen_test_bin_npu_vec(dir, n, kernel_name="vec_kernel"):
+    test_src = f"""
+int main(int argc, char **argv) {{
+  int n = {n};
+
+  // initialize ACL handles
+  aclrtStream stream = NULL;
+  void *X = NULL, *Y = NULL;
+  aclInit(NULL);
+  int32_t device_id = 0;
+  aclrtSetDevice(device_id);
+  aclrtMalloc(&X, n * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&Y, n * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtCreateStream(&stream);
+  load_{kernel_name}();
+
+  // initialize input data
+  int32_t hX[n];
+  memset(hX, 0, n * 4);
+  read_csv_to_buffer32(argv[1], hX, n);
+  aclrtMemcpyAsync(X, n * 4, hX, n * 4, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtSynchronizeStream(stream);
+
+  // launch kernel
+  int ret = {kernel_name}_default(stream, Y, X, n);
+  if (ret != 0) fprintf(stderr, "kernel launch failed\\n");
+  assert(ret == 0);
+  aclrtSynchronizeStream(stream);
+
+  // read data
+  int32_t hY[n];
+  memset(hY, 0, n * 4);
+  aclrtMemcpyAsync(hY, n * 4, Y, n * 4, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtSynchronizeStream(stream);
+  write_buffer_to_csv(argv[2], hY, n);
+
+  // free acl handles
+  unload_{kernel_name}();
+  aclrtFree(X);
+  aclrtFree(Y);
+  aclrtDestroyStream(stream);
+  aclFinalize();
+}}
+"""
+    src = test_utils_src + test_src
+    with open(os.path.join(dir, "test.c"), "w") as file:
+        file.write(src)
+
+    include_flags, link_flags, lib_dirs, python_libdir, python_lib, _ = _npu_toolchain()
+    command = ["gcc", "test.c"]
+    command.extend(include_flags)
+    command.extend(link_flags)
+    if python_libdir:
+        command += [f"-L{python_libdir}", f"-Wl,-rpath,{python_libdir}"]
+    for lib_dir in lib_dirs:
+        command += [f"-Wl,-rpath,{lib_dir}"]
+    command += [
+        "-Wl,--no-as-needed", f"-l{python_lib}", "-Wl,--as-needed", "-ldl", "-L", dir, "-l", "kernel", "-o", "test"
+    ]
+    subprocess.run(command, check=True, cwd=dir)
+
+
+def compile_multi_kernels(dir, kernel_path, block):
+    sigs = [
+        ("caller_kernel", f"*fp32, *fp32, i32, 2, {block}"),
+        ("plain_kernel", f"*fp32, *fp32, i32, {block}"),
+    ]
+    grid = f"(n_elements + {block} - 1) / {block}, 1, 1"
+    for kernel_name, sig in sigs:
+        _compile_kernel(
+            dir=dir,
+            signature=sig,
+            kernel_name=kernel_name,
+            out_name=kernel_name,
+            out_path=kernel_name,
+            num_warps=1,
+            grid=grid,
+            kernel_path=kernel_path,
+        )
+
+
+def gen_test_bin_npu_multi(dir, n):
+    test_src = f"""
+int main(int argc, char **argv) {{
+  int n = {n};
+
+  // initialize ACL handles
+  aclrtStream stream = NULL;
+  void *X = NULL, *Y1 = NULL, *Y2 = NULL;
+  aclInit(NULL);
+  int32_t device_id = 0;
+  aclrtSetDevice(device_id);
+  aclrtMalloc(&X, n * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&Y1, n * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&Y2, n * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtCreateStream(&stream);
+  load_caller_kernel();
+  load_plain_kernel();
+
+  // initialize input data
+  int32_t hX[n];
+  memset(hX, 0, n * 4);
+  read_csv_to_buffer32(argv[1], hX, n);
+  aclrtMemcpyAsync(X, n * 4, hX, n * 4, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtSynchronizeStream(stream);
+
+  // launch kernels
+  int ret = caller_kernel_default(stream, Y1, X, n);
+  if (ret != 0) fprintf(stderr, "caller kernel launch failed\\n");
+  assert(ret == 0);
+  ret = plain_kernel_default(stream, Y2, X, n);
+  if (ret != 0) fprintf(stderr, "plain kernel launch failed\\n");
+  assert(ret == 0);
+  aclrtSynchronizeStream(stream);
+
+  // read data
+  int32_t hY[n];
+  memset(hY, 0, n * 4);
+  aclrtMemcpyAsync(hY, n * 4, Y1, n * 4, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtSynchronizeStream(stream);
+  write_buffer_to_csv(argv[2], hY, n);
+  memset(hY, 0, n * 4);
+  aclrtMemcpyAsync(hY, n * 4, Y2, n * 4, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtSynchronizeStream(stream);
+  write_buffer_to_csv(argv[3], hY, n);
+
+  // free acl handles
+  unload_caller_kernel();
+  unload_plain_kernel();
+  aclrtFree(X);
+  aclrtFree(Y1);
+  aclrtFree(Y2);
+  aclrtDestroyStream(stream);
+  aclFinalize();
+}}
+"""
+    utils_src = test_utils_src.replace('#include "kernel.h"', "")
+    includes = '#include "kernel_caller_kernel.h"\n#include "kernel_plain_kernel.h"\n'
+    src = includes + utils_src + test_src
+    with open(os.path.join(dir, "test.c"), "w") as file:
+        file.write(src)
+
+    include_flags, link_flags, lib_dirs, python_libdir, python_lib, _ = _npu_toolchain()
+    command = ["gcc", "test.c"]
+    command.extend(include_flags)
+    command.extend(link_flags)
+    if python_libdir:
+        command += [f"-L{python_libdir}", f"-Wl,-rpath,{python_libdir}"]
+    for lib_dir in lib_dirs:
+        command += [f"-Wl,-rpath,{lib_dir}"]
+    command += [
+        "-Wl,--no-as-needed", f"-l{python_lib}", "-Wl,--as-needed", "-ldl", "-L", dir, "-l", "kernel", "-o", "test"
+    ]
+    subprocess.run(command, check=True, cwd=dir)
+
+
+def link_aot_kernels_multi(dir, kernel_names):
+    linker_path = os.path.join(triton.tools.__path__[0], "link.py")
+
+    for kernel_name in kernel_names:
+        h_files = glob.glob(os.path.join(dir, f"{kernel_name}.*.h"))
+        cmd = [sys.executable, linker_path] + h_files + ["-o", f"kernel_{kernel_name}"] + ["--backend", "npu"]
+        subprocess.run(cmd, check=True, cwd=dir)
+
+
+def generate_matmul_test_data(dir, M, N, K, dtype="fp16"):
+    if dtype == "fp32":
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+        a_bits = a.view(np.int32)
+        b_bits = b.view(np.int32)
+    elif dtype == "bf16":
+        import torch
+
+        a_bits = torch.randn(M, K).to(torch.bfloat16).view(torch.int16).numpy()
+        b_bits = torch.randn(K, N).to(torch.bfloat16).view(torch.int16).numpy()
+        a = (a_bits.astype(np.uint16).astype(np.uint32) << np.uint32(16)).view(np.float32)
+        b = (b_bits.astype(np.uint16).astype(np.uint32) << np.uint32(16)).view(np.float32)
+    else:
+        a = np.random.randn(M, K).astype(np.float16)
+        b = np.random.randn(K, N).astype(np.float16)
+        a_bits = a.view(np.int16)
+        b_bits = b.view(np.int16)
     a_path = os.path.join(dir, "a.csv")
     b_path = os.path.join(dir, "b.csv")
     c_path = os.path.join(dir, "c.csv")
-    for x, path in [(a, a_path), (b, b_path)]:
-        x.view(np.int16).ravel().tofile(path, sep=",")
+    for bits, path in [(a_bits, a_path), (b_bits, b_path)]:
+        bits.ravel().tofile(path, sep=",")
     return a, b, a_path, b_path, c_path
 
 
@@ -420,6 +692,102 @@ def test_compile_link_matmul():
         c_tri = c.reshape((M, N)).view(np.float32)
         c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
         np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+
+
+@pytest.mark.parametrize("dtype, atol, rtol", [("fp32", 1e-3, 1e-3), ("fp16", 1e-3, 1e-3), ("bf16", 1e-3, 1e-3)])
+@pytest.mark.parametrize("shape", [(16, 16, 16), (32, 64, 24), (128, 64, 32), (64, 16, 64)])
+def test_compile_link_matmul_shapes(dtype, atol, rtol, shape):
+    np.random.seed(3)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        BM, BN, BK = 16, 16, 16
+        M, N, K = shape
+
+        kernel_path = write_triton_kernels(tmp_dir, kernel_src, kernel_utils_src)
+        compile_aot_kernel_no_specialization(tmp_dir, kernel_path, dtype, BM, BN, BK)
+        link_aot_kernels(tmp_dir)
+
+        # compile test case
+        gen_kernel_library_npu(tmp_dir, "libkernel.so")
+        gen_test_bin_npu(tmp_dir, M, N, K, dtype=dtype, kernel_name=f"matmul_{dtype}")
+
+        # initialize test data
+        a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, M, N, K, dtype=dtype)
+
+        # run test case
+        subprocess.run(["./test", a_path, b_path, c_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+        # read data and compare against reference
+        c = np.genfromtxt(c_path, delimiter=",", dtype=np.int32)
+        c_tri = c.reshape((M, N)).view(np.float32)
+        c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+        np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("shape", [(4096, ), (100, ), (64, 64), (16, 16, 16), (8, 8, 8, 8), (4, 4, 4, 4, 4),
+                                   (4, 64, 4, 4, 4, 32)])
+def test_compile_link_vec_shapes(shape):
+    np.random.seed(3)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        n = int(np.prod(shape))
+        scale, block = 2, 1024
+
+        kernel_path = write_triton_kernels(tmp_dir, vec_kernel_src, "")
+        compile_aot_vec_kernel(tmp_dir, kernel_path, scale, block)
+        link_aot_kernels(tmp_dir)
+
+        # compile test case
+        gen_kernel_library_npu(tmp_dir, "libkernel.so")
+        gen_test_bin_npu_vec(tmp_dir, n)
+
+        # initialize test data
+        x = np.random.randn(n).astype(np.float32)
+        x_path = os.path.join(tmp_dir, "x.csv")
+        y_path = os.path.join(tmp_dir, "y.csv")
+        x.view(np.int32).ravel().tofile(x_path, sep=",")
+
+        # run test case
+        subprocess.run(["./test", x_path, y_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+        # read data and compare against reference
+        y = np.genfromtxt(y_path, delimiter=",", dtype=np.int32).reshape(shape).view(np.float32)
+        np.testing.assert_allclose(y, x.reshape(shape) * scale, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("kernel_src_variant", ["cross_file", "same_file"])
+def test_compile_link_multi_kernels(kernel_src_variant):
+    np.random.seed(3)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        n, block = 1536, 1024
+        if kernel_src_variant == "cross_file":
+            kernel_path = write_triton_kernels(tmp_dir, multi_kernel_src, kernel_utils_src)
+        else:
+            kernel_path = write_triton_kernels(tmp_dir, multi_kernel_same_file_src, "")
+
+        compile_multi_kernels(tmp_dir, kernel_path, block)
+        link_aot_kernels_multi(tmp_dir, ["caller_kernel", "plain_kernel"])
+
+        # compile test case
+        gen_kernel_library_npu(tmp_dir, "libkernel.so")
+        gen_test_bin_npu_multi(tmp_dir, n)
+
+        # initialize test data
+        x = np.random.randn(n).astype(np.float32)
+        x_path = os.path.join(tmp_dir, "x.csv")
+        y1_path = os.path.join(tmp_dir, "y1.csv")
+        y2_path = os.path.join(tmp_dir, "y2.csv")
+        x.view(np.int32).ravel().tofile(x_path, sep=",")
+
+        # run test case
+        subprocess.run(["./test", x_path, y1_path, y2_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+        # read data and compare against reference
+        y1 = np.genfromtxt(y1_path, delimiter=",", dtype=np.int32).view(np.float32)
+        y2 = np.genfromtxt(y2_path, delimiter=",", dtype=np.int32).view(np.float32)
+        np.testing.assert_allclose(y1, x * 2, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(y2, x + 1.0, atol=1e-4, rtol=1e-4)
 
 
 def test_launcher_has_no_available_kernel():
