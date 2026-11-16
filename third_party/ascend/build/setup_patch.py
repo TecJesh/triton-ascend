@@ -420,6 +420,32 @@ def _ensure_npuir_submodule():
     build_npuir()
 
 
+def _patch_distributed_sources(distributed_dir):
+    """Adapt the pinned Triton-Distributed sources to the triton 3.8 headers.
+
+    Triton 3.8 renamed ``include/triton/Tools/Sys/GetEnv.hpp`` to
+    ``GetEnv.h`` (contents and namespaces unchanged). The pinned
+    Triton-Distributed commit predates the rename and upstream TD has no
+    adapted commit yet (master still ships the old include), so rewrite the
+    include here after checkout. The rewrite is idempotent and becomes a
+    no-op once a future TD pin carries the rename itself.
+    """
+    old_include = '"triton/Tools/Sys/GetEnv.hpp"'
+    new_include = '"triton/Tools/Sys/GetEnv.h"'
+    patched = []
+    for pattern in ("*.cc", "*.cpp", "*.h", "*.hpp"):
+        for path in sorted(distributed_dir.rglob(pattern)):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if old_include in text:
+                path.write_text(text.replace(old_include, new_include), encoding="utf-8")
+                patched.append(path.relative_to(distributed_dir).as_posix())
+    if patched:
+        print(f"Rewrote GetEnv.hpp -> GetEnv.h for triton 3.8 in: {', '.join(patched)}")
+
+
 def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
@@ -447,6 +473,22 @@ def _ensure_distributed_submodule():
             "fetch",
             "origin",
         ], cwd=distributed_dir)
+        # Undo the include rewrite a previous build left in the tree (see
+        # _patch_distributed_sources) so re-checking out the pin, possibly a
+        # different one after a pin bump, is not blocked by local changes.
+        dirty = subprocess.run([
+            "git",
+            "diff",
+            "--name-only",
+        ], capture_output=True, text=True, cwd=distributed_dir).stdout.splitlines()
+        rewritten = []
+        for name in dirty:
+            path = distributed_dir / name
+            text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+            if '"triton/Tools/Sys/GetEnv.h"' in text:
+                rewritten.append(name)
+        if rewritten:
+            checkout_file(rewritten, cwd=distributed_dir)
         subprocess.check_call([
             "git",
             "checkout",
@@ -461,6 +503,7 @@ def _ensure_distributed_submodule():
         current_id = result.stdout.strip()
         if current_id != commit_id:
             raise RuntimeError(f"Triton-Distributed submodule is not {commit_id}")
+    _patch_distributed_sources(distributed_dir)
 
 
 def _copy_ascend_tools(extdir, cmake_dir):
