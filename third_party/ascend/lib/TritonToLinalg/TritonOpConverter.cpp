@@ -830,6 +830,42 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
+// Clamp the input of a float -> OCP fp8 (e4m3fn / e5m2) downcast to the
+// destination's finite range. Other backends lower such casts to a saturating
+// instruction (cvt.*.satfinite), but the Ascend lowering of arith.truncf is
+// non-saturating, so out-of-range values currently become NaN (e4m3fn, which
+// has no infinity encoding) or infinity (e5m2) instead of +/-max.
+// minimumf/maximumf are used instead of minnumf/maxnumf on purpose: they
+// propagate NaN, keeping NaN inputs NaN instead of clamping them to max.
+static Value clampToFloat8Range(PatternRewriter &rewriter, Location loc,
+                                Value input, Type dstElemType) {
+  auto srcElemType = cast<FloatType>(getElementTypeOrSelf(input.getType()));
+  const double maxFinite =
+      APFloat::getLargest(cast<FloatType>(dstElemType).getFloatSemantics())
+          .convertToDouble();
+
+  auto createOperand = [&](double value) -> Value {
+    Value scalar = rewriter
+                       .create<arith::ConstantOp>(
+                           loc, rewriter.getFloatAttr(srcElemType, value))
+                       .getResult();
+    if (auto tensorType = dyn_cast<RankedTensorType>(input.getType())) {
+      auto empty = rewriter.create<tensor::EmptyOp>(
+          loc, tensorType.getShape(), tensorType.getElementType(),
+          tensorType.getEncoding());
+      return rewriter
+          .create<linalg::FillOp>(loc, ValueRange{scalar}, ValueRange{empty})
+          .result();
+    }
+    return scalar;
+  };
+
+  Value upper =
+      rewriter.create<arith::MinimumFOp>(loc, input, createOperand(maxFinite));
+  return rewriter.create<arith::MaximumFOp>(loc, createOperand(-maxFinite),
+                                            upper);
+}
+
 LogicalResult
 FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
                                      PatternRewriter &rewriter) const {
@@ -892,13 +928,22 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
 
     auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
     extOp->setAttr("round_mode", roundModeAttr);
+    Value truncInput = extOp.getResult();
+    if (isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType)) {
+      truncInput = clampToFloat8Range(rewriter, loc, truncInput, dstElemType);
+    }
     auto truncOp =
-        rewriter.create<arith::TruncFOp>(loc, resultType, extOp.getResult());
+        rewriter.create<arith::TruncFOp>(loc, resultType, truncInput);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
-    auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
+    Value truncInput = input;
+    if (isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType)) {
+      truncInput = clampToFloat8Range(rewriter, loc, truncInput, dstElemType);
+    }
+    auto truncOp =
+        rewriter.create<arith::TruncFOp>(loc, resultType, truncInput);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else {

@@ -416,7 +416,15 @@ def test_typeconvert_downcast_clamping(src_dtype, dst_dtype, mode, device, round
         BLOCK_SIZE
     )
 
+    # Not every backend implements torch fp8 tensor ops (e.g. torch_npu does
+    # not support fill_/isnan/assert_close on fp8 tensors), so compare the raw
+    # fp8 bit patterns, which are identical to the stored values.
+    dst_bits = dst.view(torch.int8).cpu()
+
     if mode == 'nan':
-        assert(torch.all(torch.isnan(dst)))
+        # NaN has several valid encodings (the sign bit may be set), so decode
+        # the bits on CPU instead of expecting one canonical pattern.
+        assert(torch.all(torch.isnan(dst_bits.view(torch_dst_dtype).to(torch.float32))))
     else:
-        torch.testing.assert_close(dst, torch.full_like(dst, expected_result))
+        expected_bits = torch.tensor([expected_result], dtype=torch.float32).to(torch_dst_dtype).view(torch.int8)
+        assert(torch.all(dst_bits == expected_bits))
