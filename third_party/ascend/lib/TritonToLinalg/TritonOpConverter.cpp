@@ -928,12 +928,12 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
 
     auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
     extOp->setAttr("round_mode", roundModeAttr);
-    Value truncInput = extOp.getResult();
-    if (isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType)) {
-      truncInput = clampToFloat8Range(rewriter, loc, truncInput, dstElemType);
-    }
+    // No clamping here: same-bitwidth conversions only happen between fp8
+    // formats (e.g. e5m2 <-> e4m3fn). Other backends do not define saturating
+    // semantics for those (NVPTX has no fp8->fp8 cvt, and torch's own fp8
+    // casts are non-saturating), so keep the existing semantics unchanged.
     auto truncOp =
-        rewriter.create<arith::TruncFOp>(loc, resultType, truncInput);
+        rewriter.create<arith::TruncFOp>(loc, resultType, extOp.getResult());
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
