@@ -7,14 +7,27 @@ from torch.testing import assert_close
 import triton
 import triton.language as tl
 
+# ---------------------------------------------------------------------------
+# Standalone case: load a uint tensor (0..255) and print it, with no
+# conversion in the kernel.
+#
+#   pytest python/test/unit/language/print_helper.py::test_device_print_uint_load -s
+# ---------------------------------------------------------------------------
+import os
+
+os.environ.setdefault("TRITON_DEVICE_PRINT", "1")
+
+BLOCK = 256
+
 
 def get_current_target_warp_size():
-    return triton.runtime.driver.active.get_current_target().warp_size
+    return triton.runtime.driver.active.get_current_target().warp_size or 32
 
 
 @triton.jit
 def kernel_device_print(X, Y, BLOCK: tl.constexpr):
     x = tl.load(X + tl.arange(0, BLOCK))
+    # tl.device_print("x.dtype: ", x.dtype)
     tl.device_print("x: ", x)
     tl.store(Y + tl.arange(0, BLOCK), x)
 
@@ -168,3 +181,18 @@ def test_print(func: str, data_type: str, device: str):
 if __name__ == "__main__":
     fn = globals()[sys.argv[1]]
     fn(*sys.argv[2:])
+
+
+@triton.jit
+def kernel_device_print_uint_load(X, BLOCK: tl.constexpr):
+    # `x` is uint8 as loaded from memory; the kernel does not convert anything.
+    x = tl.load(X + tl.arange(0, BLOCK))
+    tl.device_print("x: ", x)
+
+
+def test_device_print_uint_load():
+    # Values 0..255, loaded as uint8 and printed as-is.
+    x = torch.arange(0, BLOCK, device="npu").to(torch.uint8)
+    num_warps = max(1, BLOCK // 32)
+    kernel_device_print_uint_load[(1, )](x, num_warps=num_warps, BLOCK=BLOCK)
+    torch.npu.synchronize()
